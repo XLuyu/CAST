@@ -2,37 +2,32 @@ package edu.nus
 
 import me.tongfei.progressbar.ProgressBar
 import htsjdk.samtools.reference.*
-import org.apache.commons.io.FileUtils
 import java.io.File
 
 class FastaWriter(file: File){
     private val writer = file.bufferedWriter()
-    fun writeRecord(name:String, seq:String) { //TODO: simplify
-        writer.write(">$name")
-        var cnt = 0
-        for ( c in seq){
-            if (cnt%80==0) writer.newLine()
-            writer.write(c.toString())
-            cnt += 1
-        }
-        writer.newLine()
+    fun writeRecord(name:String, seq:String) {
+        writer.write(">$name\n")
+        for ( line in seq.chunked(80)) writer.write(line+"\n")
     }
     fun close() { writer.close()}
 }
-class Stringer(private val conf:CAST) {
+class Stringer(private val draftFile:File, outDir:File) {
     private val javaRuntime = Runtime.getRuntime()
     private val IDpattern = Regex("""([^(]+)\((\d+),(\d+)\)\((\d+),(\d+)\)""")
-    private val fastaFileName = conf.draftFile
-    private val tempRef = File(conf.blastTmpDir, "ref.fasta")
-    private val tempQry = File(conf.blastTmpDir, "qry.fasta")
-    private val lossSeq by lazy{ java.io.PrintWriter(File(conf.blastTmpDir, "LossSeq.fasta"))}
-    private val scaffoldInfo by lazy{ java.io.PrintWriter(File(conf.outDir, "scaffold_info.log"))}
-    private val fasta = FastaSequenceFile(File(fastaFileName),false)
-    private val outFasta = FastaWriter(conf.outputFasta)
+    private val blastTmpDir = File(outDir, "blast_tmp")
+    private val tempRef = File(blastTmpDir, "ref.fasta")
+    private val tempQry = File(blastTmpDir, "qry.fasta")
+    private val lossSeq by lazy{ java.io.PrintWriter(File(blastTmpDir, "LossSeq.fasta"))}
+    private val scaffoldInfo by lazy{ java.io.PrintWriter(File(blastTmpDir, "scaffold_info.log"))}
+    private val outFasta = FastaWriter(File(outDir, "CAST.fasta"))
     private val contigs = mutableMapOf<String,String>() //Draft Genome
     private var records = mutableListOf<Triple<String,String,Double>>() //raw link info in file
     private var links:List<Link>? = null //Edge
     private val getSegment = mutableMapOf<String,Segment>() //global dict of Segment for no duplicate and identity
+    fun MutableMap<String,Segment>.getByName(name:String): Segment {
+        return this.getOrPut(name, { Segment(name) })
+    }
     inner class Segment(identifier:String) {
         private val groups = IDpattern.find(identifier)!!.groups.map { it!!.value }
         var contig = groups[1]
@@ -50,7 +45,7 @@ class Stringer(private val conf:CAST) {
         }
     }
     inner class OrientedSegment(val segment:Segment, private val forward:Boolean){
-        constructor(identifier:String, forward:Boolean=true) : this(getSegment.getOrPut(identifier, { Segment(identifier) }),forward)
+        constructor(identifier:String, forward:Boolean=true) : this(getSegment.getByName(identifier),forward)
         fun len() = segment.len()
         fun seq() = if (forward) segment.seq() else segment.seq().reversed() .map { Util.complementary.getOrDefault(it,'N') } .joinToString(separator="")
         fun leftLossSeq() = if (forward) contigs[segment.contig]!!.substring(segment.left-1,segment.leftEx-1) else contigs[segment.contig]!!.substring(segment.rightEx,segment.right)
@@ -79,13 +74,14 @@ class Stringer(private val conf:CAST) {
     }
     inner class Link(A:String, B:String, val s:Double){
         val joint = arrayOf(//TODO: simplify
-            Pair(getSegment.getOrPut(A.substring(1), { Segment(A.substring(1)) }),if (A[0]=='+') 0 else 1),
-            Pair(getSegment.getOrPut(B.substring(1), { Segment(B.substring(1)) }),if (B[0]=='+') 0 else 1))
+            Pair(getSegment.getByName(A.substring(1)),if (A[0]=='+') 0 else 1),
+            Pair(getSegment.getByName(B.substring(1)),if (B[0]=='+') 0 else 1))
         operator fun get(idx:Int, place:Int) = OrientedSegment(joint[idx].first,joint[idx].second!=place)
         var overlap:List<Int>? = null
     }
 
     private fun loadFasta() {
+        val fasta = FastaSequenceFile(draftFile,false)
         var contig: ReferenceSequence? = fasta.nextSequence()
         while (contig!=null){ //TODO: simplify
             contigs[contig.name] = contig.baseString.toUpperCase()
@@ -94,8 +90,8 @@ class Stringer(private val conf:CAST) {
         links = records.map{Link(it.first, it.second, it.third)}
     }
     private fun BLASTSeqPair(ref:String, qry:String): List<List<Int>> {
-        FileUtils.write(tempRef,">reference\n$ref\n", false)
-        FileUtils.write(tempQry,">query\n$qry\n", false)
+        tempRef.writeText(">reference\n$ref\n")
+        tempQry.writeText(">query\n$qry\n")
         javaRuntime.exec("makeblastdb -in ${tempRef.absolutePath} -dbtype nucl").waitFor()
         val cmd = javaRuntime.exec(arrayOf("blastn", "-db", tempRef.absolutePath, "-query", tempQry.absolutePath, "-outfmt", "6 sstart send qstart qend"))
         return cmd.inputStream.bufferedReader().readLines().map{ line -> line.split('\t').map{it.toInt() } }
@@ -207,17 +203,13 @@ class Stringer(private val conf:CAST) {
     }
 
     fun correctAndScaffoldFasta() {
-        if (!conf.blastTmpDir.exists()) conf.blastTmpDir.mkdirs()
-        scaffoldInfo.write(conf.args.joinToString(" ","cmd: ","\n"))
+        if (!blastTmpDir.exists()) blastTmpDir.mkdirs()
         loadFasta()
         val filteredSegments = linkFilter()
         mergeAndWrite(filteredSegments)
         outFasta.close()
         lossSeq.close()
         scaffoldInfo.close()
-    }
-    fun put(a:String,b:String,s:Double) {
-        records.add(Triple(a,b,s))
     }
     fun loadEdgeFromFile(filename:String) {
         File(filename).forEachLine { line ->

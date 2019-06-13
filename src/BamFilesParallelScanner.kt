@@ -6,21 +6,20 @@ import java.io.File
 import kotlinx.coroutines.*
 
 open class BamFileScanner(filename:String){
-    val bamFile = SamReaderFactory.makeDefault().open(File(filename))
-    val header = bamFile.fileHeader.sequenceDictionary
-    val fileIterator = bamFile.iterator()
-    var currentRead:SAMRecord? = fileIterator.next()
-    var sw = SlidingWindowArray(100000)
-    var badRegion = SlidingWindowInt(100000)
-
-    val code = mapOf<Char,Int>('A' to 0,'C' to 1,'G' to 2,'T' to 3)
+    private val bamFile = SamReaderFactory.makeDefault().open(File(filename))
+    val header = bamFile.fileHeader.sequenceDictionary!!
+    private val fileIterator = bamFile.iterator()
+    private var currentRead:SAMRecord? = fileIterator.next()
+    private var sw = SlidingWindowArray(100000)
+    private var badRegion = SlidingWindowInt(100000)
+    private val code = mapOf('A' to 0,'C' to 1,'G' to 2,'T' to 3)
     var cached = 0
-    var cigarRegex = Regex("""(\d+)[SHDI]""")
+    private var cigarRegex = Regex("""(\d+)[SHDI]""")
 
     private fun isBadRead(read:SAMRecord) = read.mappingQuality <30 || read.mateUnmappedFlag || read.mateReferenceName !=read.referenceName ||
         cigarRegex.findAll(read.cigarString).map{it.groups[1]!!.value.toInt() }.map{it*it-1}.sum()+read.getIntegerAttribute("NM")>0.1*read.readLength ||
         read.hasAttribute("XA")
-    fun updateSpanReadsByPosition(cid:Int,pos:Int): Unit {
+    private fun updateSpanReadsByPosition(cid:Int, pos:Int) {
         cached = pos + sw.size/2
         while (currentRead!=null) {
             if (currentRead!!.readUnmappedFlag) { currentRead = fileIterator.next(); continue }
@@ -29,7 +28,7 @@ open class BamFileScanner(filename:String){
             if (icid < cid) { currentRead = fileIterator.next(); continue }
             if (icid == cid && ipos <= cached) {
                 val record = currentRead!!
-                currentRead = fileIterator.next();
+                currentRead = fileIterator.next()
                 val bad = isBadRead(record)
                 val read = record.readString
                 val qual = record.baseQualities
@@ -55,17 +54,16 @@ open class BamFileScanner(filename:String){
     }
 }
 class BamFilesParallelScanner(filenames:List<String>){
-    val bamScanners = filenames.map{ BamFileScanner(it) }
-    val headers = bamScanners.map{ it.header }
+    private val bamScanners = filenames.map{ BamFileScanner(it) }
+    private val headers = bamScanners.map{ it.header }
     val header = headers[0]
-    var cid = 0
+    private var cid = 0
     var pos = 0
     private var maxpos = header.getSequence(cid).sequenceLength
-    val pb = ProgressBar("Scan Bam files", header.referenceLength)
+    private val pb = ProgressBar("Scan Bam files", header.referenceLength)
     init { nextPosition() }
     fun nextPosition(): Boolean { // return true if on same contig
         pos += 1
-        Dispatchers.Default
         if (pos>maxpos){
             pb.stepBy(pos%1000L).extraMessage = "finished ${getChrom()}"
             pos = 1
@@ -88,6 +86,6 @@ class BamFilesParallelScanner(filenames:List<String>){
             }
         else
             bamScanners.map { it.get(cid, pos)}
-    fun getChrom() = header.getSequence(cid).sequenceName
+    fun getChrom() = header.getSequence(cid).sequenceName!!
     fun hasNext() = cid<header.size()
 }

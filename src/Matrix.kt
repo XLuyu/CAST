@@ -6,7 +6,7 @@ object Util {
     val complementary = mapOf('A' to 'T', 'C' to 'G', 'G' to 'C', 'T' to 'A')
     fun PearsonCorrelationSimilarity(rawA: List<Double>, rawB: List<Double>): Double {
         val AB = rawA.indices.filterNot { rawA[it].isNaN() || rawB[it].isNaN() }
-        if (AB.size < 2) return 0.0 //TODO: matrix with NaN are not used to calculate Pearson, 0.0 has no effect
+        if (AB.size < 2) return 0.0 //throw Exception("Attempt to compute Pearson between two NaN-rich vectors!")
         val A = rawA.slice(AB)
         val B = rawB.slice(AB)
         val avgA = A.average()
@@ -19,7 +19,7 @@ object Util {
     }
 }
 
-class Genotype(acgt_: List<Double>, val badCount: Int = 0) { //TODO: distinguish reliable/known
+class Genotype(acgt_: List<Double>, badCount: Int = 0) { //TODO: distinguish reliable/known
     var sum = acgt_.sum().roundToInt()
     var acgt = if (sum != 0) acgt_.map { it / sum } else acgt_
     val isReliable = badCount <= 0.1 * sum && acgt[4] < 0.1
@@ -28,7 +28,7 @@ class Genotype(acgt_: List<Double>, val badCount: Int = 0) { //TODO: distinguish
     }
 
     fun distance(other: Genotype): Double {
-        if (!this.isReliable || !other.isReliable) throw Exception("[Error] attempt to compute unreliably genotypes' distance!!")
+        if (!this.isReliable || !other.isReliable) throw Exception("[Error] attempt to compute unreliable genotypes' distance!!")
         if (this.sum == 0 || other.sum == 0) return Double.NaN
         return acgt.indices.sumByDouble { Math.abs(acgt[it] - other.acgt[it]) } / 2
     }
@@ -53,19 +53,25 @@ class GenotypeVector(val vector: List<Genotype>) {
     }
 
     fun isHeterogeneous() = isHeterogeneousPrecheck() && toDistMatrix().none { x ->
-            val sx = x.filter { !it.isNaN() }.sorted();
+            val sx = x.filter { !it.isNaN() }.sorted()
             sx.isNotEmpty() && sx.last() - sx[1] < 0.2
         } // to check if heterogeneity is not from mutation
 
     fun consistentWithDepth(depth: List<Double>): Boolean {
         val fold = vector.indices.map { vector[it].sum / depth[it] }
-        return fold.all { it <= 1.8 }
-                && toDistMatrix().map { Math.abs(Util.PearsonCorrelationSimilarity(it.toList(), fold))}.average() < 0.8
+        try {
+            return fold.all { it <= 1.8 }
+                    && toDistMatrix().map { Math.abs(Util.PearsonCorrelationSimilarity(it.toList(), fold))}.average() < 0.8
+        } catch (e:Exception){
+            println(fold.joinToString())
+            vector.forEach { println(it.sum) }
+            throw e
+        }
     }
 }
 
 class Matrix(var data:Array<DoubleArray>){
-    constructor(size: Int) : this(Array<DoubleArray>(size) { DoubleArray(size){0.0} }) {}
+    constructor(size: Int) : this(Array<DoubleArray>(size) { DoubleArray(size){0.0} })
     fun timesUpdate(factor:Double) {
         for (i in data.indices)
             for (j in data[i].indices)

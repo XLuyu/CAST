@@ -4,27 +4,24 @@ import com.github.ajalt.clikt.core.*
 import com.github.ajalt.clikt.parameters.arguments.argument
 import com.github.ajalt.clikt.parameters.arguments.multiple
 import com.github.ajalt.clikt.parameters.options.*
-import org.apache.commons.io.FileUtils
+import com.github.ajalt.clikt.parameters.types.file
 import org.tc33.jheatchart.HeatChart
 import java.io.File
 
-class CAST(val args: Array<String>) : CliktCommand() {
-    val output by option("-o", help="output directory [CAST_output]").default("CAST_output")
-    val heatmap by option(help="output distance matrix heatmap [None]").flag()
-    val draftFile by argument(help="draft assembly (usually parent) to be improved")
-    val bamFiles by argument(help=".bam files (usually progeny) to provide genetic information, one file for each individual")
+class CAST(private val args: Array<String>) : CliktCommand() {
+    private val output by option("-o", help="output directory [CAST_output]").default("CAST_output")
+    private val heatmap by option(help="output distance matrix heatmap [None]").flag()
+    private val draftFile by argument(help="draft assembly (usually parent) to be improved").file(true)
+    private val bamFiles by argument(help=".bam files (usually progeny) to provide genetic information, one file for each individual")
         .multiple(true)
-    val coverage by lazy{ DepthDetector(bamFiles).getCoverage }
-    val bamScanner by lazy{ BamFilesParallelScanner(bamFiles) }
-    val decay = 0.99995
+    private val coverage by lazy{ DepthDetector(bamFiles).getCoverage }
+    private val bamScanner by lazy{ BamFilesParallelScanner(bamFiles) }
+    private val decay = 0.99995
 
-    val outDir by lazy { File(output) }
-    val blastTmpDir by lazy { File(outDir, "blast_tmp") }
-    val heatmapDir by lazy { File(outDir, "heatmap") }
-    val reportFile by lazy { File(outDir, "report") }
-    val outputFasta by lazy { File(outDir, "CAST.fasta") }
-    val geneticPlot by lazy { File(outDir, "pearson_vs_dist") }
-    val reliablePlot by lazy { File(outDir, "reliable.wig") }
+    private val outDir by lazy { File(output) }
+    private val heatmapDir by lazy { File(outDir, "heatmap") }
+    private val reportFile by lazy { File(outDir, "report") }
+    private val reliablePlot by lazy { File(outDir, "reliable.bed") }
 
     private fun support(a: Array<DoubleArray>, b: Array<DoubleArray>) =
         a.indices.map { i ->
@@ -36,33 +33,29 @@ class CAST(val args: Array<String>) : CliktCommand() {
         // scan this contig to get all snp sites
         val contig = bamScanner.getChrom()
         val contiglen = bamScanner.header.getSequence(contig).sequenceLength
-        var sites:MutableList<Pair<Int, GenotypeVector>> = ArrayList<Pair<Int, GenotypeVector>> (contiglen / 1000)
-        val bwseq = StringBuilder("fixedStep chrom=$contig start=1 step=1\n")
+        var sites = ArrayList<Pair<Int, GenotypeVector>> (contiglen / 1000)
+        val bwseq = StringBuilder()
         do {
             val gv = GenotypeVector(bamScanner.get())
             gv.vector.indices.forEach {i -> gv.vector[i].checksum(coverage[i]*0.1)}
             if (gv.isReliable && gv.isHeterogeneous()) {
-                bwseq.append("1\n")
+                bwseq.append("$contig\t${bamScanner.pos-1}\t${bamScanner.pos}\n")
                 sites.add(Pair(bamScanner.pos, gv))
 //                if (contig=="scf7180000001717|quiver")
 //                    HeatChart(gv.toDistMatrix()).saveToFile(File(heatmapDir,"${contig}_${bamScanner.pos}.png"))
-            } else  bwseq.append("0\n")
+            }
         } while (bamScanner.nextPosition())
-        FileUtils.write(reliablePlot,bwseq.toString(),false)
-        sites = sites.filter { (_, gv) -> gv.consistentWithDepth(coverage) }.toMutableList()
+        reliablePlot.writeText(bwseq.toString())
+        sites = sites.filterTo(ArrayList()){ (_, gv) -> gv.consistentWithDepth(coverage) }
         if (sites.size < 1) {
-            println("\n[$contig] SNP: ${sites.size} sites (No enough SNP)") //TODO: to comment
             return  mutableListOf<Pair<String, Pair<Matrix, Matrix>>>()
         } else {
             println("\n[$contig] SNP: ${sites.size} sites")
         }
-        if (sites.size < 10) {
-            sites.forEach{println(it)}
-        }
         // train matrix
-        var rightScanSum = Matrix(bamFiles.size)
-        var leftScanSum = Matrix(bamFiles.size)
-        var matrix = Matrix(bamFiles.size)
+        val rightScanSum = Matrix(bamFiles.size)
+        val leftScanSum = Matrix(bamFiles.size)
+        val matrix = Matrix(bamFiles.size)
         val snapshot = ArrayList<Matrix?>(sites.size)
         val segment = ArrayList<Pair<Pair<Pair<Int, Int>, Pair<Int, Int>>, Pair<Matrix, Matrix>?>>() //TODO: type alias
         // left to right scan
@@ -143,7 +136,7 @@ class CAST(val args: Array<String>) : CliktCommand() {
         }
         return GVmap
     }
-    fun pairwiseMutualBest(contigsGV: List<Pair<String, Matrix>>): ArrayList<Pair<String, Pair<String, Double>>> {
+    private fun pairwiseMutualBest(contigsGV: List<Pair<String, Matrix>>): ArrayList<Pair<String, Pair<String, Double>>> {
         val candidate = ArrayList<Pair<String, Pair<String, Double>>>()
         for ((k, v) in contigsGV) {
             val contig = k.substring(1)
@@ -154,16 +147,20 @@ class CAST(val args: Array<String>) : CliktCommand() {
     }
 
     override fun run() {
-//        print(coverage.map { it.toInt() }.joinToString("|","\nDepth:","\n"))
-//        val contigsTwoEndGV = getAllGVFromScanner()
-//        val contigsOneEndGV = contigsTwoEndGV .flatMap { (contig, v) -> listOf(Pair("+$contig", v.first), Pair("-$contig", v.second)) }
-//        val finalLink = pairwiseMutualBest(contigsOneEndGV)
-//        if (reportFile.exists()) reportFile.delete()
-//        for ((k, v) in finalLink) if (k < v.first) {
-//            FileUtils.write(reportFile,"$k\t${v.first}\t${v.second}\n",true)
-//        }
+        outDir.mkdirs()
+        if (reportFile.exists()) reportFile.delete()
+        val reportWriter = reportFile.bufferedWriter()
+        reportWriter.write(args.joinToString(" ","cmd: ","\n"))
+        println(coverage.map { it.toInt() }.joinToString("|","\nDepth:"))
+        val contigsTwoEndGV = getAllGVFromScanner()
+        val contigsOneEndGV = contigsTwoEndGV .flatMap { (contig, v) -> listOf(Pair("+$contig", v.first), Pair("-$contig", v.second)) }
+        val finalLink = pairwiseMutualBest(contigsOneEndGV)
+        for ((k, v) in finalLink) if (k < v.first) {
+            reportWriter.write("$k\t${v.first}\t${v.second}\n")
+        }
+        reportWriter.close()
         //======
-        val stringer = Stringer(this)
+        val stringer = Stringer(draftFile, outDir)
         stringer.loadEdgeFromFile(reportFile.absolutePath)
         stringer.correctAndScaffoldFasta()
     }
