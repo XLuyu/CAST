@@ -7,7 +7,7 @@ import com.github.ajalt.clikt.parameters.options.*
 import com.github.ajalt.clikt.parameters.types.file
 import org.tc33.jheatchart.HeatChart
 import java.io.File
-
+typealias MatMat = Pair<Matrix,Matrix>
 class CAST(private val args: Array<String>) : CliktCommand() {
     private val output by option("-o", help="output directory [CAST_output]").default("CAST_output")
     private val heatmap by option(help="output distance matrix heatmap [None]").flag()
@@ -29,7 +29,7 @@ class CAST(private val args: Array<String>) : CliktCommand() {
             val p = b[i].indices.filter{it != i}.map{b[i][it]}
             Math.abs(Util.PearsonCorrelationSimilarity(q, p))
         }.sum() / a.size
-    private fun getOneChromGVFromScanner(): List<Pair<String, Pair<Matrix, Matrix>?>> {
+    private fun getOneChromGVFromScanner(): List<Pair<String, MatMat?>> {
         // scan this contig to get all snp sites
         val contig = bamScanner.getChrom()
         val contiglen = bamScanner.header.getSequence(contig).sequenceLength
@@ -37,7 +37,7 @@ class CAST(private val args: Array<String>) : CliktCommand() {
         val bwseq = StringBuilder()
         do {
             val gv = GenotypeVector(bamScanner.get())
-            gv.vector.indices.forEach {i -> gv.vector[i].checksum(coverage[i]*0.1)}
+//            gv.vector.indices.forEach {i -> gv.vector[i].checksum(coverage[i]*0.1)}
             if (gv.isReliable && gv.isHeterogeneous()) {
                 bwseq.append("$contig\t${bamScanner.pos-1}\t${bamScanner.pos}\n")
                 sites.add(Pair(bamScanner.pos, gv))
@@ -48,7 +48,7 @@ class CAST(private val args: Array<String>) : CliktCommand() {
         reliablePlot.writeText(bwseq.toString())
         sites = sites.filterTo(ArrayList()){ (_, gv) -> gv.consistentWithDepth(coverage) }
         if (sites.size < 1) {
-            return  mutableListOf<Pair<String, Pair<Matrix, Matrix>>>()
+            return  mutableListOf<Pair<String, MatMat>>()
         } else {
             println("\n[$contig] SNP: ${sites.size} sites")
         }
@@ -57,7 +57,6 @@ class CAST(private val args: Array<String>) : CliktCommand() {
         val leftScanSum = Matrix(bamFiles.size)
         val matrix = Matrix(bamFiles.size)
         val snapshot = ArrayList<Matrix?>(sites.size)
-        val segment = ArrayList<Pair<Pair<Pair<Int, Int>, Pair<Int, Int>>, Pair<Matrix, Matrix>?>>() //TODO: type alias
         // left to right scan
         var lastpos = 0
         matrix.fill(Double.NaN)
@@ -75,12 +74,13 @@ class CAST(private val args: Array<String>) : CliktCommand() {
         if (snapshot.last() == null) {
             println("\n[$contig] SNP: some sample is missing across whole contig")
             for (i in matrix.data.indices)if (matrix.data[i].all {it.isNaN()}) print("sample $i is missing\n")
-            return ArrayList<Pair<String, Pair<Matrix, Matrix>>>()
+            return ArrayList<Pair<String, MatMat>>()
         }
         // right to left scan
         lastpos = contiglen + 1
         matrix.fill(Double.NaN)
         var lastSegEnd = sites.size - 1
+        val segment = ArrayList<Pair<Array<Int>, MatMat>?>()
         for (i in sites.indices.reversed()) {
             val (pos, gv) = sites[i]
             matrix.updateBy(Matrix(gv.toDistMatrix()))
@@ -92,9 +92,9 @@ class CAST(private val args: Array<String>) : CliktCommand() {
                     val matrixPearson = support(snapshot[i - 1]!!.data, rightScanSum.data)
 //          FileUtils.write(conf.geneticPlot,f"$matrixPearson\t${sites(i).first-sites(i-1).first}\n",true)
                     if (matrixPearson < 0.3) {
-                        val seg = Pair(Pair(Pair(sites[i - 1].first, sites[i].first), Pair(
+                        val seg = Pair(arrayOf(sites[i - 1].first, sites[i].first,
                         if (lastSegEnd == sites.size - 1) contiglen else sites[lastSegEnd].first,
-                        if (lastSegEnd == sites.size - 1) contiglen else sites[lastSegEnd + 1].first)),
+                        if (lastSegEnd == sites.size - 1) contiglen else sites[lastSegEnd + 1].first),
                         Pair(rightScanSum.copy(), snapshot[lastSegEnd]!!))
                         segment.add(seg)
                         lastSegEnd = i - 1
@@ -103,32 +103,35 @@ class CAST(private val args: Array<String>) : CliktCommand() {
             }
             lastpos = pos
         }
-        val seg = Pair(Pair(Pair(1, 1), Pair(
+        val seg = Pair(arrayOf(1, 1,
             if (lastSegEnd == sites.size - 1) contiglen else sites[lastSegEnd].first,
-            if (lastSegEnd == sites.size - 1) contiglen else sites[lastSegEnd + 1].first)),
-        Pair(rightScanSum.copy(), snapshot[lastSegEnd]!!))
+            if (lastSegEnd == sites.size - 1) contiglen else sites[lastSegEnd + 1].first),
+            Pair(rightScanSum.copy(), snapshot[lastSegEnd]!!))
         segment.add(seg)
         // merge non-solid segments (100% flexible end)
+        segment.reverse()
         for (i in 1 until segment.size - 1) {
             val (j, k, l) = Triple(segment[i - 1], segment[i], segment[i + 1])
-            if (j.first.first == k.first.second && k.first.first == l.first.second) {
-                segment[i + 1] = Pair(Pair(l.first.first, k.first.second), Pair(l.second!!.first, k.second!!.second)) //TODO: Bug check!
-                segment[i] = Pair(k.first,null)
+            if (k!!.first[1]==k.first[2]) {
+                l!!.first[0] = k.first[0]
+                j!!.first[3] = k.first[3]
+                segment[i] = j
+                segment[i - 1] = null
             }
         }
-        val named_segment = segment.filter{it != null}.map{x -> Pair(
-            "$contig(${x.first.first.first},${x.first.first.second})(${x.first.second.first},${x.first.second.second})", x.second)} // TODO: Bug check!
+        val named_segment = segment.filterNotNull().map{x ->
+            Pair("$contig(${x.first[0]},${x.first[1]})(${x.first[2]},${x.first[3]})", x.second)}
         if (heatmap) {
             if (!heatmapDir.exists()) heatmapDir.mkdirs()
             for ((name, headMatrixAndTailMatrix) in named_segment) {
-                HeatChart(headMatrixAndTailMatrix!!.first.data).saveToFile(File(heatmapDir,"${name}_L.png"))
+                HeatChart(headMatrixAndTailMatrix.first.data).saveToFile(File(heatmapDir,"${name}_L.png"))
                 HeatChart(headMatrixAndTailMatrix.second.data).saveToFile(File(heatmapDir,"${name}_R.png"))
             }
         }
         return named_segment
     }
-    private fun getAllGVFromScanner(): MutableMap<String, Pair<Matrix, Matrix>> {
-        val GVmap = mutableMapOf<String, Pair<Matrix, Matrix>>()
+    private fun getAllGVFromScanner(): MutableMap<String, MatMat> {
+        val GVmap = mutableMapOf<String, MatMat>()
         while (bamScanner.hasNext()) {
             val CGV = getOneChromGVFromScanner()
             for ((contig, headMatrixAndTailMatrix) in CGV)
