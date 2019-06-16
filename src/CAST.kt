@@ -34,18 +34,16 @@ class CAST(private val args: Array<String>) : CliktCommand() {
         // scan this contig to get all snp sites
         val contig = bamScanner.getChrom()
         val contiglen = bamScanner.header.getSequence(contig).sequenceLength
-        var sites = ArrayList<Pair<Int, GenotypeVector>> (contiglen / 1000)
+        val sites = ArrayList<Pair<Int, GenotypeVector>> (contiglen / 1000)
         val bwseq = StringBuilder()
         do {
             val gv = bamScanner.get()
-            gv.vector.indices.forEach {i -> gv.vector[i].checksum(coverage[i].second*0.1)}
-            if (gv.isReliable&& gv.isHeterogeneous()) {
+            if (gv.isReliable&& gv.isHeterogeneous(coverage.map {it.second})) {
                 bwseq.append("$contig\t${bamScanner.pos-1}\t${bamScanner.pos}\n")
                 sites.add(Pair(bamScanner.pos, gv))
             }
         } while (bamScanner.nextPosition())
         reliablePlot.writeText(bwseq.toString())
-        sites = sites.filterTo(ArrayList()){ (_, gv) -> gv.consistentWithDepth(coverage.map {it.second}) }
         if (sites.size < 1) {
             return  mutableListOf<Pair<String, MatMat>>()
         } else {

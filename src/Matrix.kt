@@ -22,14 +22,12 @@ object Util {
 class Genotype(acgt_: List<Double>, badCount: Int = 0, lowerbound: Double, upperBound:Double) { //TODO: distinguish reliable/known
     var sum = acgt_.sum().roundToInt()
     var acgt = if (sum != 0) acgt_.map { it / sum } else acgt_
-    val isReliable = badCount <= 0.1 * sum && acgt[4] < 0.1
-    fun checksum(lowerbound: Double) {
-        if (sum <= lowerbound) sum = 0
-    }
+    val isReliable = badCount <= 0.1 * sum && acgt[4] < 0.1 && sum <= upperBound
+    val known = sum > lowerbound
 
     fun distance(other: Genotype): Double {
         if (!this.isReliable || !other.isReliable) throw Exception("[Error] attempt to compute unreliable genotypes' distance!!")
-        if (this.sum == 0 || other.sum == 0) return Double.NaN
+        if (!known || !other.known) return Double.NaN
         return acgt.indices.sumByDouble { Math.abs(acgt[it] - other.acgt[it]) } / 2
     }
 }
@@ -48,21 +46,20 @@ class GenotypeVector(val vector: List<Genotype>, depth: List<Double>) {
 
 //            && consistentWithDepth(depth)
     private fun isHeterogeneousPrecheck(): Boolean {
-        val nonZero = vector.filter { it.sum > 0 }
+        val nonZero = vector.filter { it.known }
         return (0..4).sumByDouble { i->
             val column = nonZero.map { it.acgt[i] }
             if (column.isNotEmpty()) column.max()!!-column.min()!! else 0.0
         } >= 0.4
     }
 
-    fun isHeterogeneous() = isHeterogeneousPrecheck() && toDistMatrix().none { x ->
+    fun isHeterogeneous(depth: List<Double>) = isHeterogeneousPrecheck() && toDistMatrix().let { m ->
+        val fold = vector.indices.map { vector[it].sum / depth[it] }
+        m.none { x -> // to check if heterogeneity is not from mutation
             val sx = x.filter { !it.isNaN() }.sorted()
             sx.isNotEmpty() && sx.last() - sx[1] < 0.2
-        } // to check if heterogeneity is not from mutation
-
-    fun consistentWithDepth(depth: List<Double>): Boolean {
-        val fold = vector.indices.map { vector[it].sum / depth[it] }
-        return fold.all { it <= 1.8 } && toDistMatrix().map { Math.abs(Util.PearsonCorrelationSimilarity(it.toList(), fold))}.average() < 0.8
+        }  &&
+        m.map { Math.abs(Util.PearsonCorrelationSimilarity(it.toList(), fold))}.average() < 0.8
     }
 }
 
