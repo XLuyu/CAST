@@ -19,7 +19,7 @@ object Util {
     }
 }
 
-class Genotype(acgt_: List<Double>, badCount: Int = 0) { //TODO: distinguish reliable/known
+class Genotype(acgt_: List<Double>, badCount: Int = 0, lowerbound: Double, upperBound:Double) { //TODO: distinguish reliable/known
     var sum = acgt_.sum().roundToInt()
     var acgt = if (sum != 0) acgt_.map { it / sum } else acgt_
     val isReliable = badCount <= 0.1 * sum && acgt[4] < 0.1
@@ -34,7 +34,7 @@ class Genotype(acgt_: List<Double>, badCount: Int = 0) { //TODO: distinguish rel
     }
 }
 
-class GenotypeVector(val vector: List<Genotype>) {
+class GenotypeVector(val vector: List<Genotype>, depth: List<Double>) {
     fun toDistMatrix(): Array<DoubleArray> =
         vector.map { i ->
             vector.map { j ->
@@ -43,7 +43,10 @@ class GenotypeVector(val vector: List<Genotype>) {
             }.toDoubleArray()
         }.toTypedArray()
 
-    val isReliable = vector.all { it.isReliable } && vector.count { it.sum == 0 } <= vector.size / 2
+    val isReliable = vector.all { it.isReliable }
+            && vector.count { it.sum == 0 } <= vector.size / 2
+
+//            && consistentWithDepth(depth)
     private fun isHeterogeneousPrecheck(): Boolean {
         val nonZero = vector.filter { it.sum > 0 }
         return (0..4).sumByDouble { i->
@@ -59,14 +62,7 @@ class GenotypeVector(val vector: List<Genotype>) {
 
     fun consistentWithDepth(depth: List<Double>): Boolean {
         val fold = vector.indices.map { vector[it].sum / depth[it] }
-        try {
-            return fold.all { it <= 1.8 }
-                    && toDistMatrix().map { Math.abs(Util.PearsonCorrelationSimilarity(it.toList(), fold))}.average() < 0.8
-        } catch (e:Exception){
-            println(fold.joinToString())
-            vector.forEach { println(it.sum) }
-            throw e
-        }
+        return fold.all { it <= 1.8 } && toDistMatrix().map { Math.abs(Util.PearsonCorrelationSimilarity(it.toList(), fold))}.average() < 0.8
     }
 }
 
@@ -116,11 +112,4 @@ class Matrix(var data:Array<DoubleArray>){
                 data[i][j] = v
     }
     fun containsNaN() = data.any { row -> row.any { it.isNaN() }}
-    fun printline(hint:String) {
-        println("======$hint")
-        for ( i in data){
-            i.forEach{ print("$it%.2f\t")}
-            println()
-        }
-    }
 }

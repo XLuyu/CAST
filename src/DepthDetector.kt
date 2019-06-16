@@ -3,7 +3,7 @@ package edu.nus
 import kotlinx.coroutines.*
 import me.tongfei.progressbar.ProgressBar
 
-class BamFileDetector(filename:String): BamFileScanner(filename){
+class BamFileDetector(filename:String): BamFileScanner(filename, 0.0, 1000000.0){
     private var coverageStat = mutableMapOf<Int,Long>()
 
     override fun get(cid:Int,pos:Int): Genotype {
@@ -11,9 +11,18 @@ class BamFileDetector(filename:String): BamFileScanner(filename){
         if (genotype.isReliable) coverageStat[genotype.sum] =  coverageStat.getOrDefault(genotype.sum,0) + 1
         return genotype
     }
-    fun getCoverage(): Double {
+    fun getCoverage(): Triple<Double,Double,Double> {
         val lowerbound = coverageStat.map{it.key*it.value}.sum()/coverageStat.values.sum().toDouble() //TODO: too high, use Int
-        return coverageStat.filter{it.key>=lowerbound}.maxBy{it.value}?.key?.toDouble() ?:0.0
+        val cov = coverageStat.filter{it.key>=lowerbound}.maxBy{it.value}?.key?.toDouble() ?:0.0
+        return Triple(cov*0.1, cov, cov)
+//        val totalBase = coverageStat.map{it.key*it.value}.sum().toDouble()
+//        val totalPos = coverageStat.values.sum()
+//        val keys = coverageStat.keys.sorted()
+//        val cdf = mutableListOf(coverageStat[keys[0]]!!)
+//        for (i in 1 until keys.size) cdf.add(cdf.last()+coverageStat[keys[i]]!!)
+//        return Triple(keys[cdf.indexOfFirst { it.toDouble()/totalPos>=0.05 }],
+//            totalBase/totalPos,
+//            keys[cdf.indexOfLast { it.toDouble()/totalPos<=0.95 }] )
     }
 }
 class DepthDetector(filenames:List<String>){

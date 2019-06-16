@@ -5,7 +5,7 @@ import me.tongfei.progressbar.ProgressBar
 import java.io.File
 import kotlinx.coroutines.*
 
-open class BamFileScanner(filename:String){
+open class BamFileScanner(filename: String, private val lowerbound:Double, private val upperbound:Double){
     private val bamFile = SamReaderFactory.makeDefault().open(File(filename))
     val header = bamFile.fileHeader.sequenceDictionary!!
     private val fileIterator = bamFile.iterator()
@@ -19,6 +19,7 @@ open class BamFileScanner(filename:String){
     private fun isBadRead(read:SAMRecord) = read.mappingQuality <30 || read.mateUnmappedFlag || read.mateReferenceName !=read.referenceName ||
         cigarRegex.findAll(read.cigarString).map{it.groups[1]!!.value.toInt() }.map{it*it-1}.sum()+read.getIntegerAttribute("NM")>0.1*read.readLength ||
         read.hasAttribute("XA")
+//     private fun isBadRead(read:SAMRecord) = read.mappingQuality < 60 || read.cigarString!="${read.readLength}M" || read.hasAttribute("XA")
     private fun updateSpanReadsByPosition(cid:Int, pos:Int) {
         cached = pos + sw.size/2
         while (currentRead!=null) {
@@ -50,11 +51,11 @@ open class BamFileScanner(filename:String){
         if (pos>cached) updateSpanReadsByPosition(cid,pos)
         val badCount = badRegion.getAndClean(pos)
         val count = sw.getAndClean(pos)
-        return Genotype(count.map{ it.toDouble() },badCount)
+        return Genotype(count.map{ it.toDouble() }, badCount, lowerbound, upperbound)
     }
 }
-class BamFilesParallelScanner(filenames:List<String>){
-    private val bamScanners = filenames.map{ BamFileScanner(it) }
+class BamFilesParallelScanner(filenames: List<String>, private val coverage: List<Triple<Double, Double, Double>>){
+    private val bamScanners = filenames.mapIndexed { i, filename -> BamFileScanner(filename, coverage[i].first, coverage[i].third) }
     private val headers = bamScanners.map{ it.header }
     val header = headers[0]
     private var cid = 0
@@ -79,13 +80,10 @@ class BamFilesParallelScanner(filenames:List<String>){
         if (pos%1000==0) pb.stepBy(1000)
         return pos!=1
     }
-    fun get() =
-        if (pos==1 || pos>bamScanners[0].cached)
-            runBlocking {
-                bamScanners.map { async (Dispatchers.Default) { it.get(cid, pos) } }.map { it.await() }
-            }
-        else
-            bamScanners.map { it.get(cid, pos)}
+    fun get() = GenotypeVector(
+        if (pos==1 || pos>bamScanners[0].cached) runBlocking {
+            bamScanners.map { async (Dispatchers.Default) { it.get(cid, pos) } }.map { it.await() }
+        } else bamScanners.map { it.get(cid, pos)}, coverage.map { it.second })
     fun getChrom() = header.getSequence(cid).sequenceName!!
     fun hasNext() = cid<header.size()
 }
