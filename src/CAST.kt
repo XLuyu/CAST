@@ -38,7 +38,7 @@ class CAST(private val args: Array<String>) : CliktCommand() {
         val bwseq = StringBuilder()
         do {
             val gv = bamScanner.get()
-            if (gv.isReliable&& gv.isHeterogeneous(coverage.map {it.second})) {
+            if (gv.isReliable) {
                 bwseq.append("$contig\t${bamScanner.pos-1}\t${bamScanner.pos}\n")
                 sites.add(Pair(bamScanner.pos, gv))
             }

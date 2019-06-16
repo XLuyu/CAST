@@ -51,7 +51,7 @@ open class BamFileScanner(filename: String, private val lowerbound:Double, priva
         if (pos>cached) updateSpanReadsByPosition(cid,pos)
         val badCount = badRegion.getAndClean(pos)
         val count = sw.getAndClean(pos)
-        return Genotype(count.map{ it.toDouble() }, badCount, lowerbound, upperbound)
+        return Genotype(count, badCount, lowerbound, upperbound)
     }
 }
 class BamFilesParallelScanner(filenames: List<String>, private val coverage: List<Triple<Double, Double, Double>>){

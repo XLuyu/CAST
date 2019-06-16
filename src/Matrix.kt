@@ -1,7 +1,5 @@
 package edu.nus
 
-import kotlin.math.roundToInt
-
 object Util {
     val complementary = mapOf('A' to 'T', 'C' to 'G', 'G' to 'C', 'T' to 'A')
     fun PearsonCorrelationSimilarity(rawA: List<Double>, rawB: List<Double>): Double {
@@ -19,9 +17,9 @@ object Util {
     }
 }
 
-class Genotype(acgt_: List<Double>, badCount: Int = 0, lowerbound: Double, upperBound:Double) { //TODO: distinguish reliable/known
-    var sum = acgt_.sum().roundToInt()
-    var acgt = if (sum != 0) acgt_.map { it / sum } else acgt_
+class Genotype(acgt_: Array<Int>, badCount: Int = 0, lowerbound: Double, upperBound:Double) {
+    var sum = acgt_.sum()
+    var acgt = if (sum != 0) acgt_.map { it / sum.toDouble() } else acgt_.map { 0.0 }
     val isReliable = badCount <= 0.1 * sum && acgt[4] < 0.1 && sum <= upperBound
     val known = sum > lowerbound
 
@@ -32,7 +30,7 @@ class Genotype(acgt_: List<Double>, badCount: Int = 0, lowerbound: Double, upper
     }
 }
 
-class GenotypeVector(val vector: List<Genotype>, depth: List<Double>) {
+class GenotypeVector(private val vector: List<Genotype>, depth: List<Double>) {
     fun toDistMatrix(): Array<DoubleArray> =
         vector.map { i ->
             vector.map { j ->
@@ -43,8 +41,7 @@ class GenotypeVector(val vector: List<Genotype>, depth: List<Double>) {
 
     val isReliable = vector.all { it.isReliable }
             && vector.count { it.sum == 0 } <= vector.size / 2
-
-//            && consistentWithDepth(depth)
+            && isHeterogeneous(depth)
     private fun isHeterogeneousPrecheck(): Boolean {
         val nonZero = vector.filter { it.known }
         return (0..4).sumByDouble { i->
