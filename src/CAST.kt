@@ -27,10 +27,7 @@ class CAST(private val args: Array<String>) : CliktCommand() {
             val p = b[i].indices.filter{it != i}.map{b[i][it]}
             Math.abs(Util.PearsonCorrelationSimilarity(q, p))
         }.sum() / a.size
-    private fun getOneChromGVFromScanner(
-        bamScanner: BamFilesParallelScanner,
-        coverage: List<Triple<Double, Double, Double>>
-    ): List<Pair<String, MatMat?>> {
+    private fun getOneChromGVFromScanner(bamScanner: BamFilesParallelScanner): List<Pair<String, MatMat?>> {
         // scan this contig to get all snp sites
         val contig = bamScanner.getChrom()
         val contiglen = bamScanner.header.getSequence(contig).sequenceLength
@@ -127,13 +124,10 @@ class CAST(private val args: Array<String>) : CliktCommand() {
         }
         return named_segment
     }
-    private fun getAllGVFromScanner(
-        bamScanner: BamFilesParallelScanner,
-        coverage: List<Triple<Double, Double, Double>>
-    ): MutableMap<String, MatMat> {
+    private fun getAllGVFromScanner(bamScanner: BamFilesParallelScanner): MutableMap<String, MatMat> {
         val GVmap = mutableMapOf<String, MatMat>()
         while (bamScanner.hasNext()) {
-            val CGV = getOneChromGVFromScanner(bamScanner,coverage)
+            val CGV = getOneChromGVFromScanner(bamScanner)
             for ((contig, headMatrixAndTailMatrix) in CGV)
                 GVmap[contig] = headMatrixAndTailMatrix!!
         }
@@ -150,22 +144,22 @@ class CAST(private val args: Array<String>) : CliktCommand() {
     }
 
     override fun run() {
-        outDir.mkdirs()
-        if (reportFile.exists()) reportFile.delete()
-        val reportWriter = reportFile.bufferedWriter()
-        reportWriter.write(args.joinToString(" ","cmd: ","\n"))
-        val coverage = DepthDetector(bamFiles).getCoverage
-        println(coverage.map { it.first }.joinToString("|","\nLower:"))
-        println(coverage.map { it.second.toInt() }.joinToString("|","\nDepth:"))
-        println(coverage.map { it.third }.joinToString("|","\nUpper:"))
-        val bamScanner = BamFilesParallelScanner(bamFiles, coverage)
-        val contigsTwoEndGV = getAllGVFromScanner(bamScanner,coverage)
-        val contigsOneEndGV = contigsTwoEndGV .flatMap { (contig, v) -> listOf(Pair("+$contig", v.first), Pair("-$contig", v.second)) }
-        val finalLink = pairwiseMutualBest(contigsOneEndGV)
-        for ((k, v) in finalLink) if (k < v.first) {
-            reportWriter.write("$k\t${v.first}\t${v.second}\n")
-        }
-        reportWriter.close()
+//        outDir.mkdirs()
+//        if (reportFile.exists()) reportFile.delete()
+//        val reportWriter = reportFile.bufferedWriter()
+//        reportWriter.write(args.joinToString(" ","cmd: ","\n"))
+//        val coverage = DepthDetector(bamFiles).getCoverage
+//        println(coverage.map { it.first }.joinToString("|","\nLower:"))
+//        println(coverage.map { it.second.toInt() }.joinToString("|","\nDepth:"))
+//        println(coverage.map { it.third }.joinToString("|","\nUpper:"))
+//        val bamScanner = BamFilesParallelScanner(bamFiles, coverage)
+//        val contigsTwoEndGV = getAllGVFromScanner(bamScanner)
+//        val contigsOneEndGV = contigsTwoEndGV .flatMap { (contig, v) -> listOf(Pair("+$contig", v.first), Pair("-$contig", v.second)) }
+//        val finalLink = pairwiseMutualBest(contigsOneEndGV)
+//        for ((k, v) in finalLink) if (k < v.first) {
+//            reportWriter.write("$k\t${v.first}\t${v.second}\n")
+//        }
+//        reportWriter.close()
         //======
         val stringer = Stringer(draftFile, reportFile, outDir)
         stringer.correctAndScaffoldFasta()

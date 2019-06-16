@@ -12,6 +12,14 @@ class FastaWriter(file: File){
     }
     fun close() { writer.close()}
 }
+class Contig {
+    var name = StringBuilder()
+    val buffer = StringBuilder()
+    fun append(id:String, seq:String){
+        name.append(id)
+        buffer.append(seq)
+    }
+}
 class Stringer(private val draftFile:File, private val reportFile:File, outDir:File) {
     private val javaRuntime = Runtime.getRuntime()
     private val IDpattern = Regex("""([^(]+)\((\d+),(\d+)\)\((\d+),(\d+)\)""")
@@ -25,7 +33,7 @@ class Stringer(private val draftFile:File, private val reportFile:File, outDir:F
     private var links = mutableListOf<Link>()  //Edge
     private val segmentPool = mutableMapOf<String,Segment>() //global dict of Segment for no duplicate and identity
     fun MutableMap<String,Segment>.getByName(name:String): OrientedSegment {
-        val segment = this.getOrPut(name, { Segment(name.substring(1)) })
+        val segment = this.getOrPut(name.substring(1), { Segment(name.substring(1)) })
         return OrientedSegment(segment, name[0]=='+')
     }
     inner class Segment(identifier:String) {
@@ -39,9 +47,12 @@ class Stringer(private val draftFile:File, private val reportFile:File, outDir:F
         fun len() = rightEx-leftEx+1
         var joint = arrayOf<Pair<Link,Int>?>(null,null)
         operator fun get(idx:Int) = joint[idx]
-        fun updateJoint(idx:Int, v:Pair<Link,Int>?) {
-            joint[idx] = v
-            if (v!=null) v.first.joint[v.second] = OrientedSegment(this,idx!=v.second)
+        init{ println(identifier)}
+        fun updateJoint(idx:Int, linkJoint:Pair<Link,Int>?) {
+            joint[idx] = linkJoint
+            linkJoint?.let { (link, end) ->
+                link.joint[end] = OrientedSegment(this,idx!=end)
+            }
         }
     }
     inner class OrientedSegment(val segment:Segment, private val forward:Boolean){
@@ -64,14 +75,6 @@ class Stringer(private val draftFile:File, private val reportFile:File, outDir:F
         }
         fun reverse() = OrientedSegment(segment, !forward)
     }
-    class Contig {
-        var name = StringBuilder()
-        val buffer = StringBuilder()
-        fun append(id:String, seq:String){
-            name.append(id)
-            buffer.append(seq)
-        }
-    }
     inner class Link(A:String, B:String, val s:Double){
         val joint = arrayOf(segmentPool.getByName(A).reverse(), segmentPool.getByName(B))
         operator fun get(idx:Int) = joint[idx]
@@ -83,7 +86,7 @@ class Stringer(private val draftFile:File, private val reportFile:File, outDir:F
         tempRef.writeText(">reference\n$ref\n")
         tempQry.writeText(">query\n$qry\n")
         javaRuntime.exec("makeblastdb -in ${tempRef.absolutePath} -dbtype nucl").waitFor()
-        val cmd = javaRuntime.exec(arrayOf("blastn", "-db", tempRef.absolutePath, "-query", tempQry.absolutePath, "-outfmt", "6 sstart send qstart qend"))
+        val cmd = javaRuntime.exec(arrayOf("blastn", "-num_threads", Runtime.getRuntime().availableProcessors().toString(), "-db", tempRef.absolutePath, "-query", tempQry.absolutePath, "-outfmt", "6 sstart send qstart qend"))
         return cmd.inputStream.bufferedReader().readLines().map{ line -> line.split('\t').map{it.toInt() } }
         // ref XXXXXXXXXXX
         //            XXXXXXXXX query
@@ -113,7 +116,7 @@ class Stringer(private val draftFile:File, private val reportFile:File, outDir:F
             }
         }
         pb.close()
-        println("[Info] ${links.count{it.overlap!=null}} candidate links pass loss filter.")
+        println("[Info] ${links.count{it.overlap!=null}} links found overlap by BLAST")
         for ( link in links) if (link.overlap!=null) {
             val ref = link[0]
             val qry = link[1]
@@ -122,16 +125,16 @@ class Stringer(private val draftFile:File, private val reportFile:File, outDir:F
             if (ref.bestR()!=Pair(link,0) && qry.bestL()==Pair(link,1)) qry.setBestL(null)
             if (ref.bestR()!=Pair(link,0) || qry.bestL()!=Pair(link,1)) link.overlap = null
         }
-        println("[Info] ${links.count{it.overlap!=null}} candidate links pass mutuality filter.")
-        val segmentsByContig = segmentPool.values.groupBy{it.contig}.flatMap { (k,v) ->
-            val segments = v.sortedBy { it.leftEx }
+        println("[Info] ${links.count{it.overlap!=null}} links agrees on both ends")
+        val segmentsByContig = segmentPool.values.groupBy{it.contig}.flatMap { (contig, segmentList) ->
+            val segments = segmentList.sortedBy { it.leftEx }
             var last = Pair(1,1)
             var lastJoint:Pair<Link,Int>? = null
             val result = mutableListOf<Segment>()
-            for ( segment in segments) {
+            for (segment in segments) {
                 if (segment[0]!=null) {
                     if (last != Pair(segment.leftEx, segment.left)) {
-                        result.add(Segment("$k(${last.first},${last.second})(${segment.leftEx},${segment.left})"))
+                        result.add(Segment("$contig(${last.first},${last.second})(${segment.leftEx},${segment.left})"))
                         result.last().updateJoint(0,lastJoint)
                         result.last().joint[1] = null
                     }
@@ -139,22 +142,22 @@ class Stringer(private val draftFile:File, private val reportFile:File, outDir:F
                     lastJoint = segment[0]
                 }
                 if (segment[1]!=null){
-                    result.add(Segment("$k(${last.first},${last.second})(${segment.right},${segment.rightEx})"))
+                    result.add(Segment("$contig(${last.first},${last.second})(${segment.right},${segment.rightEx})"))
                     result.last().updateJoint(0,lastJoint)
                     result.last().updateJoint(1,segment[1])
                     last = Pair(segment.right,segment.rightEx)
                     lastJoint = null
                 }
             }
-            val tiglen = contigs[k]!!.length
+            val tiglen = contigs[contig]!!.length
             if (last.first!=tiglen) {
-                result.add(Segment("$k(${last.first},${last.second})($tiglen,$tiglen)"))
+                result.add(Segment("$contig(${last.first},${last.second})($tiglen,$tiglen)"))
                 result.last().updateJoint(0, lastJoint)
                 result.last().joint[1] = null
             }
             result
         }
-        println("[Info] ${segmentsByContig.size} segments from ${segmentsByContig.map{ it.contig}.toSet().size} contigs are involved in correction/scaffolding.")
+        println("[Info] ${segmentsByContig.map{ it.contig}.toSet().size} contigs are split into ${segmentsByContig.size} segments.")
         return segmentsByContig
     }
     private fun mergeAndWrite(segments: Iterable<Segment>) {

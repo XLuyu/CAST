@@ -50,7 +50,7 @@ class GenotypeVector(private val vector: List<Genotype>, depth: List<Double>) {
         } >= 0.4
     }
 
-    fun isHeterogeneous(depth: List<Double>) = isHeterogeneousPrecheck() && toDistMatrix().let { m ->
+    private fun isHeterogeneous(depth: List<Double>) = isHeterogeneousPrecheck() && toDistMatrix().let { m ->
         val fold = vector.indices.map { vector[it].sum / depth[it] }
         m.none { x -> // to check if heterogeneity is not from mutation
             val sx = x.filter { !it.isNaN() }.sorted()
