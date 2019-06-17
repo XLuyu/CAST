@@ -12,7 +12,7 @@ class FastaWriter(file: File){
     }
     fun close() { writer.close()}
 }
-class Contig {
+class ContigBuffer {
     var name = StringBuilder()
     val buffer = StringBuilder()
     fun append(id:String, seq:String){
@@ -20,67 +20,69 @@ class Contig {
         buffer.append(seq)
     }
 }
-class Stringer(private val draftFile:File, private val reportFile:File, outDir:File) {
-    private val javaRuntime = Runtime.getRuntime()
+
+class Segment(val contigName: String, val contigSeq: String, var leftEx: Int, var left: Int, var right: Int, var rightEx: Int) {
+    fun seq() = contigSeq.substring(leftEx-1,rightEx)
+    fun len() = rightEx-leftEx+1
+    var joint = arrayOf<Pair<Link,Int>?>(null,null)
+    operator fun get(idx:Int) = joint[idx]
+    fun updateJoint(idx:Int, linkJoint:Pair<Link,Int>?) {
+        joint[idx] = linkJoint
+        linkJoint?.let { (link, end) ->
+            link.joint[end] = OrientedSegment(this,idx!=end)
+        }
+    }
+}
+class OrientedSegment(val segment:Segment, private val forward:Boolean){
+    fun len() = segment.len()
+    fun seq() = if (forward) segment.seq() else segment.seq().reversed() .map { Util.complementary.getOrDefault(it,'N') } .joinToString(separator="")
+    fun leftLossSeq() = if (forward) segment.contigSeq.substring(segment.left-1,segment.leftEx-1) else segment.contigSeq.substring(segment.rightEx,segment.right)
+    fun rightLossSeq() = if (forward) segment.contigSeq.substring(segment.rightEx,segment.right) else segment.contigSeq.substring(segment.left-1,segment.leftEx-1)
+    fun leftExLen() = if (forward) segment.left-segment.leftEx else segment.rightEx-segment.right
+    fun rightExLen() = if (!forward) segment.left-segment.leftEx else segment.rightEx-segment.right
+    fun pruneL(loss:Int) = if (!forward) segment.rightEx -= loss else segment.leftEx += loss
+    fun pruneR(loss:Int) = if (forward) segment.rightEx -= loss else segment.leftEx += loss
+    fun bestL() = if (forward) segment[0] else segment[1]
+    fun bestR() = if (forward) segment[1] else segment[0]
+    fun setBestL(v:Pair<Link,Int>?) = if (forward) segment.joint[0]=v else segment.joint[1]=v
+    fun setBestR(v:Pair<Link,Int>?) = if (forward) segment.joint[1]=v else segment.joint[0]=v
+    fun getName(): String {
+        val l = if (segment.leftEx==1) "S" else segment.leftEx.toString()
+        val r = if (segment.rightEx==segment.contigSeq.length) "E" else segment.rightEx.toString()
+        return if (forward) "${segment.contigName}(${l}_$r)" else "${segment.contigName}(${r}_$l)"
+    }
+    fun reverse() = OrientedSegment(segment, !forward)
+}
+class Link(A: OrientedSegment, B: OrientedSegment, val s:Double){
+    val joint = arrayOf(A,B)
+    operator fun get(idx:Int) = joint[idx]
+    fun asOnRight(idx:Int) = if (idx==0) joint[0].reverse() else joint[1]
+    var overlap:List<Int>? = null
+}
+class SegmentPool(private val contigs: MutableMap<String, String>) :HashMap<String,Segment>(){
     private val IDpattern = Regex("""([^(]+)\((\d+),(\d+)\)\((\d+),(\d+)\)""")
+    fun getByName(name:String): OrientedSegment {
+        val segment = this.getOrPut(name.substring(1), {
+            val groups = IDpattern.find(name.substring(1))!!.groups.map { it!!.value }
+            Segment(groups[1], contigs[groups[1]]!!, groups[2].toInt(), groups[3].toInt(), groups[4].toInt(), groups[5].toInt())
+        })
+        return OrientedSegment(segment, name[0]=='+')
+    }
+    fun createWithoutPut(contigName: String, leftEx: Int, left: Int, right: Int, rightEx: Int) =
+        Segment(contigName, contigs[contigName]!!, leftEx, left, right, rightEx)
+
+}
+class Stringer(draftFile:File, reportFile:File, outDir:File) {
+    private val javaRuntime = Runtime.getRuntime()
     private val blastTmpDir = File(outDir, "blast_tmp")
     private val tempRef = File(blastTmpDir, "ref.fasta")
     private val tempQry = File(blastTmpDir, "qry.fasta")
     private val lossSeq by lazy{ java.io.PrintWriter(File(blastTmpDir, "LossSeq.fasta"))}
     private val scaffoldInfo by lazy{ java.io.PrintWriter(File(blastTmpDir, "scaffold_info.log"))}
     private val outFasta = FastaWriter(File(outDir, "CAST.fasta"))
-    private val contigs = mutableMapOf<String,String>() //Draft Genome
-    private var links = mutableListOf<Link>()  //Edge
-    private val segmentPool = mutableMapOf<String,Segment>() //global dict of Segment for no duplicate and identity
-    fun MutableMap<String,Segment>.getByName(name:String): OrientedSegment {
-        val segment = this.getOrPut(name.substring(1), { Segment(name.substring(1)) })
-        return OrientedSegment(segment, name[0]=='+')
-    }
-    inner class Segment(identifier:String) {
-        private val groups = IDpattern.find(identifier)!!.groups.map { it!!.value }
-        var contig = groups[1]
-        var leftEx = groups[2].toInt()
-        var left = groups[3].toInt()
-        var right = groups[4].toInt()
-        var rightEx = groups[5].toInt()
-        fun seq() = contigs[contig]!!.substring(leftEx-1,rightEx)
-        fun len() = rightEx-leftEx+1
-        var joint = arrayOf<Pair<Link,Int>?>(null,null)
-        operator fun get(idx:Int) = joint[idx]
-        init{ println(identifier)}
-        fun updateJoint(idx:Int, linkJoint:Pair<Link,Int>?) {
-            joint[idx] = linkJoint
-            linkJoint?.let { (link, end) ->
-                link.joint[end] = OrientedSegment(this,idx!=end)
-            }
-        }
-    }
-    inner class OrientedSegment(val segment:Segment, private val forward:Boolean){
-        fun len() = segment.len()
-        fun seq() = if (forward) segment.seq() else segment.seq().reversed() .map { Util.complementary.getOrDefault(it,'N') } .joinToString(separator="")
-        fun leftLossSeq() = if (forward) contigs[segment.contig]!!.substring(segment.left-1,segment.leftEx-1) else contigs[segment.contig]!!.substring(segment.rightEx,segment.right)
-        fun rightLossSeq() = if (forward) contigs[segment.contig]!!.substring(segment.rightEx,segment.right) else contigs[segment.contig]!!.substring(segment.left-1,segment.leftEx-1)
-        fun leftExLen() = if (forward) segment.left-segment.leftEx else segment.rightEx-segment.right
-        fun rightExLen() = if (!forward) segment.left-segment.leftEx else segment.rightEx-segment.right
-        fun pruneL(loss:Int) = if (!forward) segment.rightEx -= loss else segment.leftEx += loss
-        fun pruneR(loss:Int) = if (forward) segment.rightEx -= loss else segment.leftEx += loss
-        fun bestL() = if (forward) segment[0] else segment[1]
-        fun bestR() = if (forward) segment[1] else segment[0]
-        fun setBestL(v:Pair<Link,Int>?) = if (forward) segment.joint[0]=v else segment.joint[1]=v
-        fun setBestR(v:Pair<Link,Int>?) = if (forward) segment.joint[1]=v else segment.joint[0]=v
-        fun getName(): String {
-            val l = if (segment.leftEx==1) "S" else segment.leftEx.toString()
-            val r = if (segment.rightEx==contigs[segment.contig]!!.length) "E" else segment.rightEx.toString()
-            return if (forward) "${segment.contig}(${l}_$r)" else "${segment.contig}(${r}_$l)"
-        }
-        fun reverse() = OrientedSegment(segment, !forward)
-    }
-    inner class Link(A:String, B:String, val s:Double){
-        val joint = arrayOf(segmentPool.getByName(A).reverse(), segmentPool.getByName(B))
-        operator fun get(idx:Int) = joint[idx]
-        fun asOnRight(idx:Int) = if (idx==0) joint[0].reverse() else joint[1]
-        var overlap:List<Int>? = null
-    }
+    private val contigs = loadFasta(draftFile) //Draft Genome
+    private val segmentPool = SegmentPool(contigs) //global dict of Segment for no duplicate and identity
+    private var links = loadEdge(reportFile)  //Edge
 
     private fun BLASTSeqPair(ref:String, qry:String): List<List<Int>> {
         tempRef.writeText(">reference\n$ref\n")
@@ -126,7 +128,7 @@ class Stringer(private val draftFile:File, private val reportFile:File, outDir:F
             if (ref.bestR()!=Pair(link,0) || qry.bestL()!=Pair(link,1)) link.overlap = null
         }
         println("[Info] ${links.count{it.overlap!=null}} links agrees on both ends")
-        val segmentsByContig = segmentPool.values.groupBy{it.contig}.flatMap { (contig, segmentList) ->
+        val segmentsByContig = segmentPool.values.groupBy{it.contigName}.flatMap { (contig, segmentList) ->
             val segments = segmentList.sortedBy { it.leftEx }
             var last = Pair(1,1)
             var lastJoint:Pair<Link,Int>? = null
@@ -134,7 +136,7 @@ class Stringer(private val draftFile:File, private val reportFile:File, outDir:F
             for (segment in segments) {
                 if (segment[0]!=null) {
                     if (last != Pair(segment.leftEx, segment.left)) {
-                        result.add(Segment("$contig(${last.first},${last.second})(${segment.leftEx},${segment.left})"))
+                        result.add(segmentPool.createWithoutPut(contig, last.first, last.second, segment.leftEx, segment.left))
                         result.last().updateJoint(0,lastJoint)
                         result.last().joint[1] = null
                     }
@@ -142,7 +144,7 @@ class Stringer(private val draftFile:File, private val reportFile:File, outDir:F
                     lastJoint = segment[0]
                 }
                 if (segment[1]!=null){
-                    result.add(Segment("$contig(${last.first},${last.second})(${segment.right},${segment.rightEx})"))
+                    result.add(segmentPool.createWithoutPut(contig, last.first, last.second, segment.right, segment.rightEx))
                     result.last().updateJoint(0,lastJoint)
                     result.last().updateJoint(1,segment[1])
                     last = Pair(segment.right,segment.rightEx)
@@ -151,18 +153,18 @@ class Stringer(private val draftFile:File, private val reportFile:File, outDir:F
             }
             val tiglen = contigs[contig]!!.length
             if (last.first!=tiglen) {
-                result.add(Segment("$contig(${last.first},${last.second})($tiglen,$tiglen)"))
+                result.add(segmentPool.createWithoutPut(contig, last.first, last.second, tiglen, tiglen))
                 result.last().updateJoint(0, lastJoint)
                 result.last().joint[1] = null
             }
             result
         }
-        println("[Info] ${segmentsByContig.map{ it.contig}.toSet().size} contigs are split into ${segmentsByContig.size} segments.")
+        println("[Info] ${segmentsByContig.map{ it.contigName}.toSet().size} contigs are split into ${segmentsByContig.size} segments.")
         return segmentsByContig
     }
     private fun mergeAndWrite(segments: Iterable<Segment>) {
         val visit = mutableSetOf<Segment>()
-        fun traverse(os:OrientedSegment, contig:Contig){
+        fun traverse(os:OrientedSegment, contig:ContigBuffer){
             if (visit.contains(os.segment)) return
             visit.add(os.segment)
             if (os.bestR()!=null){
@@ -183,40 +185,46 @@ class Stringer(private val draftFile:File, private val reportFile:File, outDir:F
             } else contig.append(os.getName(),os.seq())
         }
         for ( segment in segments) if (segment.joint.contains(null) && !visit.contains(segment)) { // for chain
-            val contig = Contig()
+            val contig = ContigBuffer()
             traverse(OrientedSegment(segment,segment[0]==null), contig)
             outFasta.writeRecord(contig.name.toString(), contig.buffer.toString())
         }
         for ( segment in segments) if (!visit.contains(segment)) { // for circle
-            val contig = Contig()
+            val contig = ContigBuffer()
             traverse(OrientedSegment(segment,true), contig)
             outFasta.writeRecord(contig.name.toString(), contig.buffer.toString())
         }
-        segments.forEach{s -> contigs.remove(s.contig) }
+        segments.forEach{s -> contigs.remove(s.contigName) }
         contigs.forEach{(k,v) -> outFasta.writeRecord(k,v) }
     }
 
     fun correctAndScaffoldFasta() {
         if (!blastTmpDir.exists()) blastTmpDir.mkdirs()
-        loadFastaAndEdge()
         val filteredSegments = linkFilter()
         mergeAndWrite(filteredSegments)
         outFasta.close()
         lossSeq.close()
         scaffoldInfo.close()
     }
-    private fun loadFastaAndEdge() {
+    private fun loadEdge(reportFile:File): MutableList<Link> {
+        val spaceChars = """\s+""".toRegex()
+        val link = mutableListOf<Link>()
+        reportFile.forEachLine { line ->
+            if (line.startsWith("+") || line.startsWith("-")){
+                val tokens = line.split(spaceChars)
+                link.add(Link(segmentPool.getByName(tokens[0]).reverse(), segmentPool.getByName(tokens[1]),tokens[2].toDouble()))
+            }
+        }
+        return link
+    }
+    private fun loadFasta(draftFile:File): MutableMap<String, String> {
+        val contigs = mutableMapOf<String,String>()
         val fasta = FastaSequenceFile(draftFile,false)
         var contig: ReferenceSequence? = fasta.nextSequence()
         while (contig!=null){
             contigs[contig.name] = contig.baseString.toUpperCase()
             contig = fasta.nextSequence()
         }
-        reportFile.forEachLine { line ->
-            if (line.startsWith("+") || line.startsWith("-")){
-                val tokens = line.split("""\s+""".toRegex())
-                links.add(Link(tokens[0],tokens[1],tokens[2].toDouble()))
-            }
-        }
+        return contigs
     }
 }
