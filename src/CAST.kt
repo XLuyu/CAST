@@ -144,24 +144,24 @@ class CAST(private val args: Array<String>) : CliktCommand() {
     }
 
     override fun run() {
-//        outDir.mkdirs()
-//        if (reportFile.exists()) reportFile.delete()
-//        val reportWriter = reportFile.bufferedWriter()
-//        reportWriter.write(args.joinToString(" ","cmd: ","\n"))
-//        val coverage = DepthDetector(bamFiles).getCoverage
-//        println(coverage.map { it.first }.joinToString("|","\nLower:"))
-//        println(coverage.map { it.second.toInt() }.joinToString("|","\nDepth:"))
-//        println(coverage.map { it.third }.joinToString("|","\nUpper:"))
-//        val bamScanner = BamFilesParallelScanner(bamFiles, coverage)
-//        val contigsTwoEndGV = getAllGVFromScanner(bamScanner)
-//        val contigsOneEndGV = contigsTwoEndGV .flatMap { (contig, v) -> listOf(Pair("+$contig", v.first), Pair("-$contig", v.second)) }
-//        val finalLink = pairwiseMutualBest(contigsOneEndGV)
-//        for ((k, v) in finalLink) if (k < v.first) {
-//            reportWriter.write("$k\t${v.first}\t${v.second}\n")
-//        }
-//        reportWriter.close()
+        outDir.mkdirs()
+        if (reportFile.exists()) reportFile.delete()
+        val reportWriter = reportFile.bufferedWriter()
+        reportWriter.write(args.joinToString(" ","cmd: ","\n"))
+        val coverage = DepthDetector(bamFiles).getCoverage
+        println(coverage.map { it.first }.joinToString("|","\nLower:"))
+        println(coverage.map { it.second.toInt() }.joinToString("|","\nDepth:"))
+        println(coverage.map { it.third }.joinToString("|","\nUpper:"))
+        val bamScanner = BamFilesParallelScanner(bamFiles, coverage)
+        val contigsTwoEndGV = getAllGVFromScanner(bamScanner)
+        val contigsOneEndGV = contigsTwoEndGV .flatMap { (contig, v) -> listOf(Pair("+$contig", v.first), Pair("-$contig", v.second)) }
+        val finalLink = pairwiseMutualBest(contigsOneEndGV)
+        for ((k, v) in finalLink) if (k < v.first) {
+            reportWriter.write("$k\t${v.first}\t${v.second}\n")
+        }
+        reportWriter.close()
         //======
-        val stringer = Stringer(draftFile, reportFile, outDir)
+        val stringer = Scaffolder(draftFile, reportFile, outDir)
         stringer.correctAndScaffoldFasta()
     }
 }
