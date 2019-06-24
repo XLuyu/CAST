@@ -20,7 +20,7 @@ object Util {
 class Genotype(acgt_: Array<Int>, badCount: Int = 0, lowerbound: Double, upperBound:Double) {
     var sum = acgt_.sum()
     var acgt = if (sum != 0) acgt_.map { it / sum.toDouble() } else acgt_.map { 0.0 }
-    val isReliable = badCount <= 0.1 * sum && acgt[4] < 0.1 && sum <= upperBound
+    val isReliable = badCount <= 0.1 * sum && sum <= upperBound
     val known = sum > lowerbound
 
     fun distance(other: Genotype): Double {

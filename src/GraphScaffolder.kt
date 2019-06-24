@@ -79,6 +79,9 @@ class LinkageGroupDock: HashMap<SiteNode,SiteNode>() {
         LGCounter += 1
         val left = node.filter { this.contains(it.target) } .maxBy { it.s }
         val right = partner.filter { this.contains(it.target) } .maxBy { it.s }
+//        println("=== ${node.getName()}\n" +
+//                "left=${left?.target?.getName()} left.link=${left?.target?.link}\n" +
+//                "right=${right?.target?.getName()} right.link=${right?.target?.link}\n")
         if (left!=null && right==null && left.target.link==null) update(node, left)
         if (left==null && right!=null && right.target.link==null) update(partner, right)
         if (left!=null && right!=null){
@@ -86,6 +89,7 @@ class LinkageGroupDock: HashMap<SiteNode,SiteNode>() {
                 || left.target.link==null && right.target.link==null && find(left.target)!=find(right.target)) { // link to 2 lg
                     update(node, left)
                     update(partner, right)
+                if (left.target.link?.target==right.target) LGCounter += 1
             }
         }
     }

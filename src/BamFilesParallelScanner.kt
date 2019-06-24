@@ -16,10 +16,10 @@ open class BamFileScanner(filename: String, private val lowerbound:Double, priva
     var cached = 0
     private var cigarRegex = Regex("""(\d+)[SHDI]""")
 
-    private fun isBadRead(read:SAMRecord) = read.mappingQuality <30 || read.mateUnmappedFlag || read.mateReferenceName !=read.referenceName ||
-        cigarRegex.findAll(read.cigarString).map{it.groups[1]!!.value.toInt() }.map{it*it-1}.sum()+read.getIntegerAttribute("NM")>0.1*read.readLength ||
-        read.hasAttribute("XA")
-//     private fun isBadRead(read:SAMRecord) = read.mappingQuality < 60 || read.cigarString!="${read.readLength}M" || read.hasAttribute("XA")
+//    private fun isBadRead(read:SAMRecord) = read.mappingQuality <30 || read.mateUnmappedFlag || read.mateReferenceName !=read.referenceName ||
+//        cigarRegex.findAll(read.cigarString).map{it.groups[1]!!.value.toInt() }.map{it*it-1}.sum()+read.getIntegerAttribute("NM")>0.1*read.readLength ||
+//        read.hasAttribute("XA")
+    private fun isBadRead(read:SAMRecord) = read.mappingQuality < 60 || read.cigarString!="${read.readLength}M" || read.hasAttribute("XA")
     private fun updateSpanReadsByPosition(cid:Int, pos:Int) {
         cached = pos + sw.size/2
         while (currentRead!=null) {
