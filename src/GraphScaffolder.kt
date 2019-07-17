@@ -77,8 +77,8 @@ class LinkageGroupDock: HashMap<SiteNode,SiteNode>() {
         this[node] = node
         this[partner] = node
         LGCounter += 1
-        val left = node.filter { this.contains(it.target) } .maxBy { it.s }
-        val right = partner.filter { this.contains(it.target) } .maxBy { it.s }
+        val left = node.filter { this.contains(it.target) } .minBy { it.s }
+        val right = partner.filter { this.contains(it.target) } .minBy { it.s }
 //        println("=== ${node.getName()}\n" +
 //                "left=${left?.target?.getName()} left.link=${left?.target?.link}\n" +
 //                "right=${right?.target?.getName()} right.link=${right?.target?.link}\n")

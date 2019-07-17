@@ -20,17 +20,37 @@ object Util {
 class Genotype(acgt_: Array<Int>, badCount: Int = 0, lowerbound: Double, upperBound:Double) {
     var sum = acgt_.sum()
     var acgt = if (sum != 0) acgt_.map { it / sum.toDouble() } else acgt_.map { 0.0 }
-    val isReliable = badCount <= 0.1 * sum && sum <= upperBound
-    val known = sum > lowerbound
+    val isReliable = badCount <= 0.1 * sum && lowerbound < sum && sum <= upperBound
+    val known = lowerbound < sum
 
     fun distance(other: Genotype): Double {
         if (!this.isReliable || !other.isReliable) throw Exception("[Error] attempt to compute unreliable genotypes' distance!!")
         if (!known || !other.known) return Double.NaN
         return acgt.indices.sumByDouble { Math.abs(acgt[it] - other.acgt[it]) } / 2
     }
+    operator fun times(other:Genotype) = (0..3).map {  acgt[it]*other.acgt[it] }.sum()
 }
 
-class GenotypeVector(private val vector: List<Genotype>, depth: List<Double>) {
+class GenotypeVector(val vector: List<Genotype>, depth: List<Double>) {
+    operator fun get(i: Int) = vector[i]
+    fun toSqrMatrix(): Array<DoubleArray> = this.vector.any { !it.known }.let { z ->
+        vector.map { i ->
+            vector.map { j -> if (!z) i * j else 0.0 }.toDoubleArray()
+        }.toTypedArray()
+    }
+    fun toCMatrix(): Array<DoubleArray> =
+        vector.map { i ->
+            vector.map { j ->
+                if ( i.distance(j).isNaN()) 0.0 else 1.0
+            }.toDoubleArray()
+        }.toTypedArray()
+    fun toDMatrix(): Array<DoubleArray> =
+        vector.map { i ->
+            vector.map { j ->
+                val d = i.distance(j)
+                if (d < 0.1 || d.isNaN()) 0.0 else d
+            }.toDoubleArray()
+        }.toTypedArray()
     fun toDistMatrix(): Array<DoubleArray> =
         vector.map { i ->
             vector.map { j ->
@@ -62,6 +82,28 @@ class GenotypeVector(private val vector: List<Genotype>, depth: List<Double>) {
 
 class Matrix(var data:Array<DoubleArray>){
     constructor(size: Int) : this(Array<DoubleArray>(size) { DoubleArray(size){0.0} })
+    fun diagonalZero() = data.indices.any {data[it][it]==0.0}
+    fun containsZero() = data.any { row -> row.any { it.isNaN() }}
+    fun toCosineMatrix() =
+        data.indices.map { i ->
+            data.indices.map { j -> if (data[i][i] == 0.0 || data[j][j] == 0.0) 0.0 else data[i][j] / Math.sqrt(data[i][i] * data[j][j]) }.toDoubleArray()
+        }.toTypedArray()
+    fun cosineClustering(): List<Int> {
+        val pairs = ArrayList<Triple<Int, Int, Double>>()
+        for (i in data.indices) if (data[i][i] != 0.0) {
+            for (j in data.indices) if (data[j][j] != 0.0) {
+                val s = data[i][j] / Math.sqrt(data[i][i] * data[j][j])
+                pairs.add(Triple(i, j, s))
+            }
+        }
+        pairs.sortByDescending { it.third }
+        val UFset = UnionFind(data.size)
+        for ((a, b, s) in pairs) {
+            if (s<0.9) break
+            UFset.union(a, b)
+        }
+        return data.indices.map { UFset.find(it) }
+    }
     fun timesUpdate(factor:Double) {
         for (i in data.indices)
             for (j in data[i].indices)
@@ -72,6 +114,13 @@ class Matrix(var data:Array<DoubleArray>){
         for (i in rt.data.indices)
             for (j in rt.data[i].indices)
                 rt.data[i][j] *= factor
+        return rt
+    }
+    operator fun div(other:Matrix): Matrix  {
+        val rt = this.copy()
+        for (i in rt.data.indices)
+            for (j in rt.data[i].indices)
+                rt.data[i][j] /= other.data[i][j]
         return rt
     }
     operator fun plusAssign(other:Matrix)  {
@@ -106,4 +155,23 @@ class Matrix(var data:Array<DoubleArray>){
                 data[i][j] = v
     }
     fun containsNaN() = data.any { row -> row.any { it.isNaN() }}
+}
+class UnionFind(size: Int): HashMap<Int, Int>(size){
+    var setNum = size
+    fun find(element: Int): Int{
+        val father = this[element]
+        if (father==null) this[element] = element
+        if (father==null || father==element) return element
+        val root = find(father)
+        this[element] = root
+        return root
+    }
+    fun union(A: Int, B: Int): Boolean {
+        val a = find(A)
+        val b = find(B)
+        if (a<b) this[b] = a
+        if (b<a) this[a] = b
+        if (a!=b) setNum--
+        return a!=b
+    }
 }

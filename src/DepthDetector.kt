@@ -12,17 +12,17 @@ class BamFileDetector(filename:String): BamFileScanner(filename, 0.0, 1000000.0)
         return genotype
     }
     fun getCoverage(): Triple<Double,Double,Double> {
-        val lowerbound = coverageStat.map{it.key*it.value}.sum()/coverageStat.values.sum().toDouble() //TODO: too high, use Int
-        val cov = coverageStat.filter{it.key>=lowerbound}.maxBy{it.value}?.key?.toDouble() ?:0.0
-        return Triple(cov*0.1, cov, cov*1.8)
-//        val totalBase = coverageStat.map{it.key*it.value}.sum().toDouble()
-//        val totalPos = coverageStat.values.sum()
-//        val keys = coverageStat.keys.sorted()
-//        val cdf = mutableListOf(coverageStat[keys[0]]!!)
-//        for (i in 1 until keys.size) cdf.add(cdf.last()+coverageStat[keys[i]]!!)
-//        return Triple(keys[cdf.indexOfFirst { it.toDouble()/totalPos>=0.05 }],
-//            totalBase/totalPos,
-//            keys[cdf.indexOfLast { it.toDouble()/totalPos<=0.95 }] )
+//        val lowerbound = coverageStat.map{it.key*it.value}.sum()/coverageStat.values.sum().toDouble() //TODO: too high, use Int
+//        val cov = coverageStat.filter{it.key>=lowerbound}.maxBy{it.value}?.key?.toDouble() ?:0.0
+//        return Triple(cov*0.1, cov, cov*1.8)
+        val totalBase = coverageStat.map{it.key*it.value}.sum().toDouble()
+        val totalPos = coverageStat.values.sum()
+        val keys = coverageStat.keys.sorted()
+        val cdf = mutableListOf(coverageStat[keys[0]]!!)
+        for (i in 1 until keys.size) cdf.add(cdf.last()+coverageStat[keys[i]]!!)
+        return Triple(keys[cdf.indexOfFirst { it.toDouble()/totalPos>=0.01 }].toDouble(),
+            totalBase/totalPos,
+            keys[cdf.indexOfFirst { it.toDouble()/totalPos>=0.99 }].toDouble() )
     }
 }
 class DepthDetector(filenames:List<String>){
