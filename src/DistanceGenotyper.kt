@@ -9,9 +9,13 @@ import kotlin.collections.ArrayList
 data class SegmentEnd(val pos: Int, var extPos: Int, val profile: Matrix, val threshold: Double)
 class DistanceGenotyper(private val bamFiles:List<String>, private val outDir: File, private val heatmap:Boolean=false){
     private var hapLen = 100000L
-    private fun diffSum(a: Array<DoubleArray>, b: Array<DoubleArray>) = a.indices.sumByDouble { i ->
+    private fun diffSum(a: Array<Array<Double>>, b: Array<Array<Double>>) =
+        a.indices.sumByDouble { i ->
             a.indices.sumByDouble { j -> Math.abs(a[i][j]-b[i][j])}
         }
+    private fun saveHeatMap(map: Array<Array<Double>>, file:File) {
+        HeatChart(map.map { it.toDoubleArray() }.toTypedArray()).saveToFile(file)
+    }
     private fun getGenotypeVectorOnChrom(bamScanner: BamFilesParallelScanner): ArrayList<Pair<Int, GenotypeVector>> {
         val contig = bamScanner.getChrom()
         val contiglen = bamScanner.header.getSequence(contig).sequenceLength
@@ -117,8 +121,9 @@ class DistanceGenotyper(private val bamFiles:List<String>, private val outDir: F
         val segment = scanGV(sites, snapshot, contiglen)
         // merge non-solid segments (100% flexible end)
         segment.reverse()
+        println()
         if (segment.size<=10)
-            segment.forEach { println("[${it!!.first.extPos},${it!!.first.pos}][${it!!.second.pos},${it!!.second.extPos}]") }
+            segment.forEach { println("[${it!!.first.extPos},${it.first.pos}][${it.second.pos},${it.second.extPos}]") }
         for (i in 1 until segment.size - 1) {
             val (j, k, l) = Triple(segment[i - 1], segment[i], segment[i + 1])
             if (k!!.first.pos==k.second.pos) {
@@ -128,7 +133,7 @@ class DistanceGenotyper(private val bamFiles:List<String>, private val outDir: F
                 segment[i - 1] = null
             }
         }
-        println("\n$contig[${contiglen} bp / ${sites.size} SNP] -> ${segment.count{it!=null}} segments (${segment.size} before adjacent merge)")
+        println("$contig[${contiglen} bp / ${sites.size} SNP] -> ${segment.count{it!=null}} segments (${segment.size} before adjacent merge)")
         val named_segment = segment.filterNotNull().flatMap{x -> listOf(
             Triple("+$contig(${x.first.extPos},${x.first.pos})(${x.second.pos},${x.second.extPos})", x.first.profile, x.first.threshold),
             Triple("-$contig(${x.first.extPos},${x.first.pos})(${x.second.pos},${x.second.extPos})", x.second.profile, x.second.threshold))}
@@ -136,12 +141,12 @@ class DistanceGenotyper(private val bamFiles:List<String>, private val outDir: F
             val heatmapDir = File(outDir, "heatmap")
             if (!heatmapDir.exists()) heatmapDir.mkdirs()
             for ((name, mat, _) in named_segment) {
-                HeatChart(mat.data).saveToFile(File(heatmapDir,"${name.substring(1)}_${if (name[0]=='+') "L" else "R"}.png"))
+                saveHeatMap(mat.data, File(heatmapDir,"${name.substring(1)}_${if (name[0]=='+') "L" else "R"}.png"))
                 val temp = Matrix(bamFiles.size)
                 for (i in temp.data.indices)
                     for (j in temp.data.indices)
                         temp.data[i][j] = Util.PearsonCorrelationSimilarity(mat.data[i].toList(), mat.data[j].toList())
-                HeatChart(temp.data).saveToFile(File(heatmapDir,"${name.substring(1)}_${if (name[0]=='+') "L" else "R"}pearson.png"))
+                saveHeatMap(temp.data, File(heatmapDir,"${name.substring(1)}_${if (name[0]=='+') "L" else "R"}pearson.png"))
 //                mat.data.forEach { row -> println(row.joinToString(separator = ","){"%.2f".format(it)}) }
             }
         }

@@ -7,7 +7,7 @@ import com.github.ajalt.clikt.parameters.options.*
 import com.github.ajalt.clikt.parameters.types.file
 import org.tc33.jheatchart.HeatChart
 import java.io.File
-typealias MatMat = Pair<Matrix,Matrix>
+
 class CAST(private val args: Array<String>) : CliktCommand() {
     private val outDir by option("-o", help="output directory [CAST_output]").file().default(File("CAST_output"))
     private val heatmap by option(help="output distance matrix heatmap [None]").flag()

@@ -12,9 +12,6 @@ class BamFileDetector(filename:String): BamFileScanner(filename, 0.0, 1000000.0)
         return genotype
     }
     fun getCoverage(): Triple<Double,Double,Double> {
-//        val lowerbound = coverageStat.map{it.key*it.value}.sum()/coverageStat.values.sum().toDouble() //TODO: too high, use Int
-//        val cov = coverageStat.filter{it.key>=lowerbound}.maxBy{it.value}?.key?.toDouble() ?:0.0
-//        return Triple(cov*0.1, cov, cov*1.8)
         val totalBase = coverageStat.map{it.key*it.value}.sum().toDouble()
         val totalPos = coverageStat.values.sum()
         val keys = coverageStat.keys.sorted()
