@@ -31,7 +31,7 @@ class Genotype(acgt_: Array<Int>, badCount: Int = 0, lowerbound: Double, upperBo
 
 class GenotypeVector(vector: List<Genotype>, depth: List<Double>): ArrayList<Genotype>(vector) {
     val isReliable = all { it.isReliable } && count { it.sum == 0 } <= size / 2  && isHeterogeneous(depth)
-    private fun selfOuterProduct(calcValue:(Genotype, Genotype) -> Double) =
+    private inline fun selfOuterProduct(calcValue:(Genotype, Genotype) -> Double) =
         map { genotypeA ->
             map { genotypeB ->
                 calcValue(genotypeA, genotypeB)
@@ -61,14 +61,14 @@ class Matrix(var data:Array<Array<Double>>){
     constructor(size: Int) : this(Array(size) { Array(size){0.0} }) // new zero matrix
     fun containsZero() = data.any { row -> row.any { it==0.0 }}
     fun containsNaN() = data.any { row -> row.any { it.isNaN() }}
-    private fun mapEachCell(f: (Int, Int) -> Double): Matrix {
+    private inline fun mapEachCell(f: (Int, Int) -> Double): Matrix {
         val new = Matrix(data.size)
         for (i in data.indices)
             for (j in data[i].indices)
                 new.data[i][j] = f(i, j)
         return new
     }
-    private fun updateEachCell(f: (Int, Int) -> Double) {
+    private inline fun updateEachCell(f: (Int, Int) -> Double) {
         for (i in data.indices)
             for (j in data[i].indices)
                 data[i][j] = f(i, j)
