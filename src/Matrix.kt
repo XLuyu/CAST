@@ -1,5 +1,9 @@
 package edu.nus
 
+import org.tc33.jheatchart.HeatChart
+import java.io.File
+import kotlin.random.Random
+
 object Util {
     val complementary = mapOf('A' to 'T', 'C' to 'G', 'G' to 'C', 'T' to 'A')
     fun PearsonCorrelationSimilarity(rawA: List<Double>, rawB: List<Double>): Double {
@@ -14,6 +18,16 @@ object Util {
         val numerator = A.indices.sumByDouble { biasA[it] * biasB[it] }
         val dominator = Math.sqrt(biasA.sumByDouble { it * it } * biasB.sumByDouble { it * it })
         return if (dominator == 0.0) 0.0 else numerator / dominator
+    }
+    fun Random.shuffle(n: Int): Array<Int> {
+        val order = Array(n){it}
+        order.indices.reversed().forEach { i ->
+            val j = this.nextInt(i+1)
+            val temp = order[i]
+            order[i] = order[j]
+            order[j] = temp
+        }
+        return order
     }
 }
 
@@ -79,4 +93,12 @@ class Matrix(var data:Array<Array<Double>>){
     operator fun plusAssign(other: Matrix) = updateEachCell { i, j -> data[i][j] + other.data[i][j]}
     fun updateBy(other:Matrix) = updateEachCell { i, j -> if (other.data[i][j].isNaN()) data[i][j] else other.data[i][j] }
     fun fill(v:Double) = updateEachCell { _, _ -> v }
+    fun absDiffSum(other: Array<Array<Double>>) =
+        data.indices.sumByDouble { i ->
+            data.indices.sumByDouble { j -> Math.abs(data[i][j]-other[i][j])}
+        }
+    fun absDiffSum(other: Matrix) = absDiffSum(other.data)
+    fun saveHeatMap(file: File) {
+        HeatChart(data.map { it.toDoubleArray() }.toTypedArray()).saveToFile(file)
+    }
 }
