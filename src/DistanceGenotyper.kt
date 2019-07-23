@@ -100,19 +100,16 @@ class DistanceGenotyper(private val bamFiles:List<String>, private val outDir: F
         if (snapshot.last()==null) return mutableListOf()
         val segment = scanGV(sites, snapshot, contiglen)
         // merge non-solid segments (100% flexible end)
-        segment.reverse()
         println()
         if (segment.size<=10)
             segment.forEach { println("\t[${it!!.first.extPos},${it.first.pos}][${it.second.pos},${it.second.extPos}]") }
-        for (i in 1 until segment.size - 1) {
-            val (j, k, l) = Triple(segment[i - 1], segment[i], segment[i + 1])
-            if (k!!.first.pos==k.second.pos) {
-                l!!.first.extPos = k.first.extPos
-                j!!.second.extPos = k.second.extPos
-                segment[i] = j
+        for (i in 1 until segment.size - 1)
+            if (segment[i]!!.first.pos==segment[i]!!.second.pos) {
+                segment[i + 1]!!.first.extPos = segment[i]!!.first.extPos
+                segment[i - 1]!!.second.extPos = segment[i]!!.second.extPos
+                segment[i] = segment[i - 1]
                 segment[i - 1] = null
             }
-        }
         println("$contig[$contiglen bp / ${sites.size} SNP] -> ${segment.count{it!=null}} segments (${segment.size} before adjacent merge)")
         val named_segment = segment.filterNotNull().flatMap{x -> listOf(
             Triple("+$contig(${x.first.extPos},${x.first.pos})(${x.second.pos},${x.second.extPos})", x.first.profile, x.first.threshold),
