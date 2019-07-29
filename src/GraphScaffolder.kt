@@ -4,7 +4,7 @@ import me.tongfei.progressbar.ProgressBar
 import htsjdk.samtools.reference.*
 import java.io.File
 
-class Edge(val overhang:Int, val overhangOverlap:Int, val s:Double, val target:SiteNode)
+class Edge(val overhang:Int, val overlap:Int, val s:Double, val target:SiteNode)
 class SiteNode(val forward: Int, val contigName: String, private val contigSeq: String,
                val pos: Int, var flex: Int = 0, var partner:SiteNode?=null):ArrayList<Edge>() {
     var link:Edge? = null
@@ -55,7 +55,7 @@ class NodePool(private val contigs: MutableMap<String, String>) :HashMap<String,
     fun remove(node:SiteNode) = this.remove("${if (node.forward==1) '+' else '-'}${node.contigName}(${node.pos})")
 }
 class LinkageGroupDock: HashMap<SiteNode,SiteNode>() {
-    var LGCounter = 0
+    fun LGCounter() = this.count { (k, v) -> k==v }
     private fun find(node: SiteNode): SiteNode{
         var s = this[node]!!
         if (s==node) return s
@@ -70,26 +70,39 @@ class LinkageGroupDock: HashMap<SiteNode,SiteNode>() {
         val B = find(node)
         if (A==B) return
         this[B] = A
-        LGCounter -= 1
+    }
+    private fun thirdPartyGain(edge: Edge, partner: SiteNode): Pair<Int, Edge?> {
+        if (edge.target.link==null) return Pair(edge.overlap, null)
+        val spouse = edge.target.link!!.target
+        val partnerEdge = partner.find { it.target==spouse } ?: return Pair(-1, null)
+        return Pair(edge.overlap + partnerEdge.overlap - edge.target.link!!.overlap, partnerEdge)
     }
     fun place(node: SiteNode) {
         val partner = node.partner!!
         this[node] = node
         this[partner] = node
-        LGCounter += 1
         val left = node.filter { this.contains(it.target) } .minBy { it.s }
         val right = partner.filter { this.contains(it.target) } .minBy { it.s }
-//        println("=== ${node.getName()}\n" +
-//                "left=${left?.target?.getName()} left.link=${left?.target?.link}\n" +
-//                "right=${right?.target?.getName()} right.link=${right?.target?.link}\n")
-        if (left!=null && right==null && left.target.link==null) update(node, left)
-        if (left==null && right!=null && right.target.link==null) update(partner, right)
-        if (left!=null && right!=null){
-            if (left.target.link?.target==right.target && left.target.link!!.overhangOverlap==0 // locate between 2 segments
-                || left.target.link==null && right.target.link==null && find(left.target)!=find(right.target)) { // link to 2 lg
+        if (left?.target?.link==null && right?.target?.link==null) { // no conflict
+            when {
+                left!=null && right!=null && find(left.target)!=find(right.target) -> {
                     update(node, left)
                     update(partner, right)
-                if (left.target.link?.target==right.target) LGCounter += 1
+                }
+                left!=null && right!=null -> if (left.overlap>right.overlap) update(node, left) else update(partner, right)
+                left!=null -> update(node, left)
+                right!=null -> update(partner, right)
+            }
+        } else if (left!=null && right!=null){
+            val (leftGain, rightEdge) = thirdPartyGain(left, partner)
+            val (rightGain, leftEdge) = thirdPartyGain(right, node)
+            if (leftGain>=0 && leftGain>=rightGain){
+                update(node, left)
+                if (rightEdge!=null) update(partner, rightEdge)
+            }
+            if (rightGain>=0 && rightGain>leftGain){
+                update(partner, right)
+                if (leftEdge!=null) update(node, leftEdge)
             }
         }
     }
@@ -119,12 +132,13 @@ class Scaffolder(draftFile:File, private val reportFile:File, outDir:File) {
         val valid = hsps.filter {hsp -> hsp[0]<hsp[1] && hsp[2]<hsp[3]}
         if (valid.isEmpty()) return listOf(0,0,0,0) // no valid alignment
         var best = valid.minBy{ Math.max(ref.len()-ref.flex-it[1],0) + Math.max(it[2]-1-qry.flex,0)}!!
-        val loss = Math.max(ref.len()-ref.flex-best[1],0) + Math.max(best[2]-1-qry.flex,0)
-        scaffoldInfo.write("[BLAST] ${ref.getName()} ${qry.getName()} loss=$loss"
-                + best.joinToString(",", " (",") ")
-                + if (loss<=best[0]-best[1]+1) "PASS\n" else " FAIL\n")
-        best = listOf(ref.len()-best[0], ref.len()-best[1], best[2]-1, best[3]-1)
-        return if (loss<=best[0]-best[1]+1) best else listOf(0,0,0,0)
+        val refLoss = Math.max(ref.len()-ref.flex-best[1],0)
+        val qryLoss = Math.max(best[2]-1-qry.flex,0)
+        scaffoldInfo.write("[BLAST] ${ref.partner!!.getName()}[${best[0]},${best[1]}] ${qry.getName()}[${best[2]},${best[3]}]  " +
+                "overlap=(${best[1]-best[0]+1},${best[3]-best[2]+1}) loss=($refLoss,$qryLoss)" +
+                if (refLoss+qryLoss<=best[1]-best[0]+1) "PASS\n" else " FAIL\n")
+        best = listOf(ref.len()-best[0]+1, ref.len()-best[1], best[2]-1, best[3])
+        return if (refLoss+qryLoss<=best[0]-best[1]+1) best else listOf(0,0,0,0)
         // best=(ref_overlap+overhang, ref_overhang, qry_overhang, qry_overhang+overlap)
     }
 
@@ -141,10 +155,10 @@ class Scaffolder(draftFile:File, private val reportFile:File, outDir:File) {
                 val link = partner.link!!
                 val next = link.target
                 val nextlink = next.link!!
-                val overlapSep = next.seq().substring(nextlink.overhang, link.overhangOverlap)
-                val overlap = nextlink.overhangOverlap-nextlink.overhang
+                val overlapSep = next.seq().substring(nextlink.overhang, link.overhang+link.overlap)
+                val overlap = nextlink.overlap
                 partner.prune(link.overhang)
-                next.prune(nextlink.overhangOverlap)
+                next.prune(nextlink.overhang+nextlink.overlap)
                 val leftloss = Math.max(0,-partner.flex)
                 val rightloss = Math.max(0,-next.flex)
                 contig.append(node.getName(), node.seq())
@@ -167,7 +181,7 @@ class Scaffolder(draftFile:File, private val reportFile:File, outDir:File) {
         val siteNodes = nodePool.values.filter { it.forward==1 }.sortedByDescending { it.len() }
         for (node in siteNodes)
             lgDock.place(node)
-        println("${siteNodes.size} segments are merged into ${lgDock.LGCounter} scaffolds")
+        println("${siteNodes.size} segments are merged into ${lgDock.LGCounter()} scaffolds")
     }
     private fun rescueDebris() { //to double check\
         val contigGroup = nodePool.values.groupBy{it.contigName}
@@ -217,8 +231,8 @@ class Scaffolder(draftFile:File, private val reportFile:File, outDir:File) {
             val qry = nodePool.getBySegment(tokens[1])
             val s = tokens[2].toDouble()
             val overlap = anchorByBLAST(ref,qry)
-            ref.add(Edge(overlap[1],overlap[0],s,qry))
-            qry.add(Edge(overlap[2],overlap[3],s,ref))
+            ref.add(Edge(overlap[1],overlap[0]-overlap[1],s,qry))
+            qry.add(Edge(overlap[2],overlap[3]-overlap[2],s,ref))
             pb.step()
         }
         pb.close()
