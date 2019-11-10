@@ -20,6 +20,7 @@ class CAST(private val args: Array<String>) : CliktCommand() {
         File(outDir,"cmd.log").writeText(args.joinToString(" ","cmd: ","\n"))
         val genotyper = DistanceGenotyper(bamFiles, outDir, heatmap)
         val reportFile = genotyper.run()
+//        val reportFile = File(outDir,"report")
         val stringer = Scaffolder(draftFile, reportFile, outDir)
         stringer.correctAndScaffoldFasta()
     }

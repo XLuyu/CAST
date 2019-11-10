@@ -30,6 +30,7 @@ class HaplotypeWindow(private val sites:ArrayList<Pair<Int, GenotypeVector>>, ma
     fun absentee() = count.data.indices.filter { count.data[it][it]==0.0 }
 }
 class DistanceGenotyper(private val bamFiles:List<String>, private val outDir: File, private val heatmap:Boolean=false){
+    private val logFile = File(outDir, "Geneotyping.log").bufferedWriter()
     private var hapLen = 100000
     private fun getGenotypeVectorOnChrom(bamScanner: BamFilesParallelScanner): ArrayList<Pair<Int, GenotypeVector>> {
         val contig = bamScanner.getChrom()
@@ -71,9 +72,10 @@ class DistanceGenotyper(private val bamFiles:List<String>, private val outDir: F
                 diffsum.add(mat.absDiffSum(shuffle))
             }
         }
-        return diffsum.min()!!
+        diffsum.sort()
+        return diffsum[0]
     }
-    private fun scanGV(sites: ArrayList<Pair<Int, GenotypeVector>>, snapshot: ArrayList<Matrix?>, contiglen: Int): ArrayList<Pair<SegmentEnd, SegmentEnd>?> {
+    private fun scanGV(sites: ArrayList<Pair<Int, GenotypeVector>>, snapshot: ArrayList<Matrix?>, contig: String, contiglen: Int): ArrayList<Pair<SegmentEnd, SegmentEnd>?> {
         val haplotype = HaplotypeWindow(sites, bamFiles.size)
         val threshold = scanSampling(snapshot)
         val segment = ArrayList<Pair<SegmentEnd,SegmentEnd>?>()
@@ -84,6 +86,7 @@ class DistanceGenotyper(private val bamFiles:List<String>, private val outDir: F
             if (avg==null || snapshot[i-1]==null || sites[i-1].first<hapLen || contiglen-hapLen+1<pos) continue
             val diff = snapshot[i-1]!!.absDiffSum(avg)
             if (diff > threshold ) {
+                logFile.write("$contig[${sites[i-1].first}:${sites[i].first}] $diff > $threshold\n")
                 segment.add(Pair(lastSegEnd, SegmentEnd(sites[i-1].first, sites[i].first, snapshot[i-1]!!, threshold)))
                 lastSegEnd = SegmentEnd(sites[i].first, sites[i - 1].first, avg, threshold)
             }
@@ -98,11 +101,8 @@ class DistanceGenotyper(private val bamFiles:List<String>, private val outDir: F
         if (sites.size < 1) return  mutableListOf()
         val snapshot = scanLeftToRight(contig, sites)
         if (snapshot.last()==null) return mutableListOf()
-        val segment = scanGV(sites, snapshot, contiglen)
+        val segment = scanGV(sites, snapshot, contig, contiglen)
         // merge non-solid segments (100% flexible end)
-        println()
-        if (segment.size<=10)
-            segment.forEach { println("\t[${it!!.first.extPos},${it.first.pos}][${it.second.pos},${it.second.extPos}]") }
         for (i in 1 until segment.size - 1)
             if (segment[i]!!.first.pos==segment[i]!!.second.pos) {
                 segment[i + 1]!!.first.extPos = segment[i]!!.first.extPos
@@ -110,7 +110,10 @@ class DistanceGenotyper(private val bamFiles:List<String>, private val outDir: F
                 segment[i] = segment[i - 1]
                 segment[i - 1] = null
             }
-        println("$contig[$contiglen bp / ${sites.size} SNP] -> ${segment.count{it!=null}} segments (${segment.size} before adjacent merge)")
+        val mergedSegmentCount = segment.count{it!=null}
+        println("\n$contig[$contiglen bp / ${sites.size} SNP] -> $mergedSegmentCount segments (${segment.size} before adjacent merge)")
+        if (mergedSegmentCount<=10)
+            segment.filterNotNull().forEach { println("\t[${it.first.extPos},${it.first.pos}][${it.second.pos},${it.second.extPos}]") }
         val named_segment = segment.filterNotNull().flatMap{x -> listOf(
             Triple("+$contig(${x.first.extPos},${x.first.pos})(${x.second.pos},${x.second.extPos})", x.first.profile, x.first.threshold),
             Triple("-$contig(${x.first.extPos},${x.first.pos})(${x.second.pos},${x.second.extPos})", x.second.profile, x.second.threshold))}
@@ -119,12 +122,6 @@ class DistanceGenotyper(private val bamFiles:List<String>, private val outDir: F
             if (!heatmapDir.exists()) heatmapDir.mkdirs()
             for ((name, mat, _) in named_segment) {
                 mat.saveHeatMap(File(heatmapDir,"${name.substring(1)}_${if (name[0]=='+') "L" else "R"}.png"))
-                val temp = Matrix(bamFiles.size)
-                for (i in temp.data.indices)
-                    for (j in temp.data.indices)
-                        temp.data[i][j] = Util.PearsonCorrelationSimilarity(mat.data[i].toList(), mat.data[j].toList())
-                temp.saveHeatMap(File(heatmapDir,"${name.substring(1)}_${if (name[0]=='+') "L" else "R"}pearson.png"))
-//                mat.data.forEach { row -> println(row.joinToString(separator = ","){"%.2f".format(it)}) }
             }
         }
 //        exitProcess(1)
@@ -158,6 +155,7 @@ class DistanceGenotyper(private val bamFiles:List<String>, private val outDir: F
         val finalLink = getPairwiseSegment(bamScanner)
         finalLink.filter { it.first < it.second }.forEach { (k, v, ds) -> reportWriter.write("$k\t$v\t$ds\n") }
         reportWriter.close()
+        logFile.close()
         return reportFile
     }
 }
